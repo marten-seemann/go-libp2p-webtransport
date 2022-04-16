@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"math/big"
 	"time"
 )
@@ -16,31 +17,29 @@ func certificateHash(c *tls.Config) [32]byte {
 	return sha256.Sum256(c.Certificates[0].Certificate[0])
 }
 
-// TODO: don't generate a chain here. A single cert should be sufficient (and save bytes).
 func getTLSConf() (*tls.Config, error) {
-	ca, caPrivateKey, err := generateCA()
+	cert, priv, err := generateCert()
 	if err != nil {
 		return nil, err
 	}
-	leafCert, leafPrivateKey, err := generateLeafCert(ca, caPrivateKey)
-	if err != nil {
-		return nil, err
-	}
-	certPool := x509.NewCertPool()
-	certPool.AddCert(ca)
 	return &tls.Config{
 		Certificates: []tls.Certificate{{
-			Certificate: [][]byte{leafCert.Raw},
-			PrivateKey:  leafPrivateKey,
+			Certificate: [][]byte{cert.Raw},
+			PrivateKey:  priv,
 		}},
 	}, nil
 }
 
-func generateCA() (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func generateCert() (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return nil, nil, err
+	}
+	serial := binary.BigEndian.Uint64(b)
 	certTempl := &x509.Certificate{
-		SerialNumber:          big.NewInt(2019),
+		SerialNumber:          big.NewInt(int64(serial)),
 		Subject:               pkix.Name{},
-		NotBefore:             time.Now().Add(-time.Hour),
+		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
@@ -60,28 +59,4 @@ func generateCA() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 		return nil, nil, err
 	}
 	return ca, caPrivateKey, nil
-}
-
-func generateLeafCert(ca *x509.Certificate, caPrivateKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	certTempl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		DNSNames:     []string{"localhost"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-	}
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, certTempl, ca, &privKey.PublicKey, caPrivateKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	cert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cert, privKey, nil
 }
