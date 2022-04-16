@@ -1,10 +1,10 @@
 package libp2pwebtransport
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
-	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-multihash"
+
 	"net"
 	"net/http"
 
@@ -14,6 +14,8 @@ import (
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multihash"
 )
 
 var errClosed = errors.New("closed")
@@ -22,7 +24,9 @@ type listener struct {
 	server  webtransport.Server
 	tlsConf *tls.Config
 
-	closed       chan struct{} // is closed when Close is called
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+
 	serverClosed chan struct{} // is closed when server.Serve returns
 
 	addr      net.Addr
@@ -57,6 +61,7 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) 
 		tlsConf:      tlsConf,
 		multiaddr:    localMultiaddr,
 	}
+	ln.ctx, ln.ctxCancel = context.WithCancel(context.Background())
 	server := webtransport.Server{
 		H3: http3.Server{
 			Server: &http.Server{
@@ -92,7 +97,7 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) 
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
 	select {
-	case <-l.closed:
+	case <-l.ctx.Done():
 		return nil, errClosed
 	default:
 	}
@@ -103,7 +108,7 @@ func (l *listener) Accept() (tpt.CapableConn, error) {
 		// TODO: libp2p handshake
 		// TODO: pass in transport
 		return &conn{wconn: c}, nil
-	case <-l.closed:
+	case <-l.ctx.Done():
 		return nil, errClosed
 	}
 }
@@ -126,7 +131,7 @@ func (l *listener) Multiaddr() ma.Multiaddr {
 }
 
 func (l *listener) Close() error {
-	close(l.closed)
+	l.ctxCancel()
 	err := l.server.Close()
 	<-l.serverClosed
 	return err
