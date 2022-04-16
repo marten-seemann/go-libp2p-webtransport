@@ -2,6 +2,7 @@ package libp2pwebtransport
 
 import (
 	"errors"
+	"net"
 
 	"github.com/marten-seemann/webtransport-go"
 
@@ -11,6 +12,21 @@ import (
 const (
 	reset webtransport.ErrorCode = 0
 )
+
+type webtransportStream struct {
+	webtransport.Stream
+	wconn *webtransport.Conn
+}
+
+var _ net.Conn = &webtransportStream{}
+
+func (s *webtransportStream) LocalAddr() net.Addr {
+	return s.wconn.LocalAddr()
+}
+
+func (s *webtransportStream) RemoteAddr() net.Addr {
+	return s.wconn.RemoteAddr()
+}
 
 type stream struct {
 	webtransport.Stream

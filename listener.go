@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-
 	"net"
 	"net/http"
+	"time"
 
 	tpt "github.com/libp2p/go-libp2p-core/transport"
+
+	noise "github.com/libp2p/go-libp2p-noise"
 
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
@@ -20,7 +22,13 @@ import (
 
 var errClosed = errors.New("closed")
 
+const queueLen = 16
+const handshakeTimeout = 10 * time.Second
+
 type listener struct {
+	transport tpt.Transport
+	noise     *noise.Transport
+
 	server  webtransport.Server
 	tlsConf *tls.Config
 
@@ -37,7 +45,7 @@ type listener struct {
 
 var _ tpt.Listener = &listener{}
 
-func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) {
+func newListener(laddr ma.Multiaddr, tlsConf *tls.Config, transport tpt.Transport, noise *noise.Transport) (tpt.Listener, error) {
 	network, addr, err := manet.DialArgs(laddr)
 	if err != nil {
 		return nil, err
@@ -55,7 +63,9 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) 
 		return nil, err
 	}
 	ln := &listener{
-		queue:        make(chan *webtransport.Conn, 10),
+		transport:    transport,
+		noise:        noise,
+		queue:        make(chan *webtransport.Conn, queueLen),
 		serverClosed: make(chan struct{}),
 		addr:         udpConn.LocalAddr(),
 		tlsConf:      tlsConf,
@@ -80,6 +90,7 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) 
 			w.WriteHeader(500)
 			return
 		}
+		// TODO: handle queue overflow
 		ln.queue <- c
 	})
 	server.H3.Handler = mux
@@ -96,21 +107,47 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config) (tpt.Listener, error) 
 }
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
-	select {
-	case <-l.ctx.Done():
-		return nil, errClosed
-	default:
-	}
+	queue := make(chan tpt.CapableConn, queueLen)
+	for {
+		select {
+		case <-l.ctx.Done():
+			return nil, errClosed
+		default:
+		}
 
-	var c *webtransport.Conn
-	select {
-	case c = <-l.queue:
-		// TODO: libp2p handshake
-		// TODO: pass in transport
-		return &conn{wconn: c}, nil
-	case <-l.ctx.Done():
-		return nil, errClosed
+		var c *webtransport.Conn
+		select {
+		case c = <-l.queue:
+			go func(c *webtransport.Conn) {
+				ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
+				defer cancel()
+				conn, err := l.handshake(ctx, c)
+				if err != nil {
+					log.Debugw("handshake failed", "error", err)
+					c.Close()
+					return
+				}
+				// TODO: handle queue overflow
+				queue <- conn
+			}(c)
+		case conn := <-queue:
+			return conn, nil
+		case <-l.ctx.Done():
+			return nil, errClosed
+		}
 	}
+}
+
+func (l *listener) handshake(ctx context.Context, c *webtransport.Conn) (tpt.CapableConn, error) {
+	str, err := c.AcceptStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wconn: c}, "")
+	if err != nil {
+		return nil, err
+	}
+	return newConn(l.transport, c, conn.LocalPrivateKey(), conn.RemotePublicKey())
 }
 
 func (l *listener) Addr() net.Addr {

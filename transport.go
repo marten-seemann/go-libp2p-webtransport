@@ -8,8 +8,10 @@ import (
 	"github.com/multiformats/go-multihash"
 	"sync"
 
+	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
+	noise "github.com/libp2p/go-libp2p-noise"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/marten-seemann/webtransport-go"
@@ -22,26 +24,44 @@ var log = logging.Logger("webtransport")
 
 const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
+const maxProtoSize = 8 << 10
+
 type transport struct {
+	privKey ic.PrivKey
+	pid     peer.ID
+
 	tlsConf *tls.Config
 	dialer  webtransport.Dialer
 
 	initOnce sync.Once
 	server   webtransport.Server
+
+	noise *noise.Transport
 }
 
 var _ tpt.Transport = &transport{}
 
-func New() (tpt.Transport, error) {
+func New(key ic.PrivKey) (tpt.Transport, error) {
+	id, err := peer.IDFromPrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
 	tlsConf, err := getTLSConf() // TODO: only do this when initializing a listener
 	if err != nil {
 		return nil, err
 	}
+	noise, err := noise.New(key)
+	if err != nil {
+		return nil, err
+	}
 	return &transport{
+		pid:     id,
+		privKey: key,
 		tlsConf: tlsConf,
 		dialer: webtransport.Dialer{
 			TLSClientConf: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
 		},
+		noise: noise,
 	}, nil
 }
 
@@ -78,11 +98,16 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	if rsp.StatusCode < 200 || rsp.StatusCode > 299 {
 		return nil, fmt.Errorf("invalid response status code: %d", rsp.StatusCode)
 	}
-	// TODO: run handshake on conn
-	return &conn{
-		transport: t,
-		wconn:     wconn,
-	}, nil
+	str, err := wconn.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: use early data and verify the cert hash
+	sconn, err := t.noise.SecureOutbound(ctx, &webtransportStream{Stream: str, wconn: wconn}, p)
+	if err != nil {
+		return nil, err
+	}
+	return newConn(t, wconn, t.privKey, sconn.RemotePublicKey())
 }
 
 var dialMatcher = mafmt.And(mafmt.IP, mafmt.Base(ma.P_UDP), mafmt.Base(ma.P_QUIC), mafmt.Base(ma.P_WEBTRANSPORT))
@@ -92,7 +117,7 @@ func (t *transport) CanDial(addr ma.Multiaddr) bool {
 }
 
 func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
-	return newListener(laddr, t.tlsConf)
+	return newListener(laddr, t.tlsConf, t, t.noise)
 }
 
 func (t *transport) Protocols() []int {
