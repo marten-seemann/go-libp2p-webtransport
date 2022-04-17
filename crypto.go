@@ -17,8 +17,8 @@ func certificateHash(c *tls.Config) [32]byte {
 	return sha256.Sum256(c.Certificates[0].Certificate[0])
 }
 
-func getTLSConf() (*tls.Config, error) {
-	cert, priv, err := generateCert()
+func getTLSConf(start, end time.Time) (*tls.Config, error) {
+	cert, priv, err := generateCert(start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -26,11 +26,12 @@ func getTLSConf() (*tls.Config, error) {
 		Certificates: []tls.Certificate{{
 			Certificate: [][]byte{cert.Raw},
 			PrivateKey:  priv,
+			Leaf:        cert,
 		}},
 	}, nil
 }
 
-func generateCert() (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func generateCert(start, end time.Time) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return nil, nil, err
@@ -39,8 +40,8 @@ func generateCert() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	certTempl := &x509.Certificate{
 		SerialNumber:          big.NewInt(int64(serial)),
 		Subject:               pkix.Name{},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotBefore:             start,
+		NotAfter:              end,
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

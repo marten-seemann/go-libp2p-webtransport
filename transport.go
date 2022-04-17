@@ -7,6 +7,7 @@ import (
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
 	"sync"
+	"time"
 
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -25,6 +26,8 @@ var log = logging.Logger("webtransport")
 const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
 const maxProtoSize = 8 << 10
+
+const certValidity = 14 * 24 * time.Hour
 
 type transport struct {
 	privKey ic.PrivKey
@@ -46,7 +49,8 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	tlsConf, err := getTLSConf() // TODO: only do this when initializing a listener
+	now := time.Now()
+	tlsConf, err := getTLSConf(now, now.Add(certValidity)) // TODO: only do this when initializing a listener
 	if err != nil {
 		return nil, err
 	}
