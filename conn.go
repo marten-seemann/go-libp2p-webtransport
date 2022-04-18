@@ -3,7 +3,6 @@ package libp2pwebtransport
 import (
 	"context"
 
-	"github.com/libp2p/go-libp2p-core/crypto"
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -61,10 +60,10 @@ func (c *conn) AcceptStream() (network.MuxedStream, error) {
 	return &stream{str}, err
 }
 
-func (c *conn) LocalPeer() peer.ID              { return c.localPeer }
-func (c *conn) LocalPrivateKey() crypto.PrivKey { return c.privKey }
-func (c *conn) RemotePeer() peer.ID             { return c.remotePeer }
-func (c *conn) RemotePublicKey() crypto.PubKey  { return c.remotePubKey }
+func (c *conn) LocalPeer() peer.ID          { return c.localPeer }
+func (c *conn) LocalPrivateKey() ic.PrivKey { return c.privKey }
+func (c *conn) RemotePeer() peer.ID         { return c.remotePeer }
+func (c *conn) RemotePublicKey() ic.PubKey  { return c.remotePubKey }
 
 func (c *conn) LocalMultiaddr() ma.Multiaddr {
 	// TODO implement me

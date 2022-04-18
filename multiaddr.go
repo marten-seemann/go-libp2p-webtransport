@@ -16,7 +16,3 @@ func toWebtransportMultiaddr(na net.Addr) (ma.Multiaddr, error) {
 	}
 	return udpMA.Encapsulate(webtransportMA), nil
 }
-
-func fromWebtransportMultiaddr(addr ma.Multiaddr) (net.Addr, error) {
-	return manet.ToNetAddr(addr.Decapsulate(webtransportMA))
-}

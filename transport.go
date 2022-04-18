@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"sync"
 	"time"
 
 	ic "github.com/libp2p/go-libp2p-core/crypto"
@@ -25,8 +24,6 @@ var log = logging.Logger("webtransport")
 
 const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
-const maxProtoSize = 8 << 10
-
 const certValidity = 14 * 24 * time.Hour
 
 type transport struct {
@@ -35,9 +32,6 @@ type transport struct {
 
 	tlsConf *tls.Config
 	dialer  webtransport.Dialer
-
-	initOnce sync.Once
-	server   webtransport.Server
 
 	noise *noise.Transport
 }
@@ -107,6 +101,7 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		return nil, err
 	}
 	// TODO: use early data and verify the cert hash
+	_ = certHashes
 	sconn, err := t.noise.SecureOutbound(ctx, &webtransportStream{Stream: str, wconn: wconn}, p)
 	if err != nil {
 		return nil, err
