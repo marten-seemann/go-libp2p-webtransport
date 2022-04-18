@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"github.com/lucas-clemente/quic-go/http3"
 	"net"
 	"net/http"
 	"time"
@@ -13,11 +12,10 @@ import (
 
 	noise "github.com/libp2p/go-libp2p-noise"
 
+	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-multihash"
 )
 
 var errClosed = errors.New("closed")
@@ -26,11 +24,11 @@ const queueLen = 16
 const handshakeTimeout = 10 * time.Second
 
 type listener struct {
-	transport tpt.Transport
-	noise     *noise.Transport
+	transport   tpt.Transport
+	noise       *noise.Transport
+	certManager *certManager
 
-	server  webtransport.Server
-	tlsConf *tls.Config
+	server webtransport.Server
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -45,7 +43,7 @@ type listener struct {
 
 var _ tpt.Listener = &listener{}
 
-func newListener(laddr ma.Multiaddr, tlsConf *tls.Config, transport tpt.Transport, noise *noise.Transport) (tpt.Listener, error) {
+func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager) (tpt.Listener, error) {
 	network, addr, err := manet.DialArgs(laddr)
 	if err != nil {
 		return nil, err
@@ -65,15 +63,17 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config, transport tpt.Transpor
 	ln := &listener{
 		transport:    transport,
 		noise:        noise,
+		certManager:  certManager,
 		queue:        make(chan *webtransport.Conn, queueLen),
 		serverClosed: make(chan struct{}),
 		addr:         udpConn.LocalAddr(),
-		tlsConf:      tlsConf,
 		multiaddr:    localMultiaddr,
 		server: webtransport.Server{
 			H3: http3.Server{
 				Server: &http.Server{
-					TLSConfig: tlsConf,
+					TLSConfig: &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+						return certManager.GetConfig(), nil
+					}},
 				},
 			},
 		},
@@ -154,16 +154,7 @@ func (l *listener) Addr() net.Addr {
 }
 
 func (l *listener) Multiaddr() ma.Multiaddr {
-	certHash := certificateHash(l.tlsConf)
-	h, err := multihash.Encode(certHash[:], multihash.SHA2_256)
-	if err != nil {
-		panic(err)
-	}
-	certHashStr, err := multibase.Encode(multibase.Base58BTC, h)
-	if err != nil {
-		panic(err)
-	}
-	return l.multiaddr.Encapsulate(ma.StringCast("/certhash/" + certHashStr))
+	return l.multiaddr.Encapsulate(l.certManager.AddrComponent())
 }
 
 func (l *listener) Close() error {

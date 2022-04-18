@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"sync"
 	"time"
 
 	ic "github.com/libp2p/go-libp2p-core/crypto"
@@ -29,8 +30,11 @@ type transport struct {
 	privKey ic.PrivKey
 	pid     peer.ID
 
-	tlsConf *tls.Config
-	dialer  webtransport.Dialer
+	dialer webtransport.Dialer
+
+	listenOnce    sync.Once
+	listenOnceErr error
+	certManager   *certManager
 
 	noise *noise.Transport
 }
@@ -42,11 +46,6 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	tlsConf, err := getTLSConf(now, now.Add(certValidity)) // TODO: only do this when initializing a listener
-	if err != nil {
-		return nil, err
-	}
 	noise, err := noise.New(key)
 	if err != nil {
 		return nil, err
@@ -54,7 +53,6 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 	return &transport{
 		pid:     id,
 		privKey: key,
-		tlsConf: tlsConf,
 		dialer: webtransport.Dialer{
 			TLSClientConf: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
 		},
@@ -129,7 +127,13 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 	if !webtransportMatcher.Matches(laddr) {
 		return nil, fmt.Errorf("cannot listen on non-WebTransport addr: %s", laddr)
 	}
-	return newListener(laddr, t.tlsConf, t, t.noise)
+	t.listenOnce.Do(func() {
+		t.certManager, t.listenOnceErr = newCertManager(certValidity)
+	})
+	if t.listenOnceErr != nil {
+		return nil, t.listenOnceErr
+	}
+	return newListener(laddr, t, t.noise, t.certManager)
 }
 
 func (t *transport) Protocols() []int {

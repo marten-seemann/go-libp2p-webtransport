@@ -32,6 +32,17 @@ func randomMultihash(t *testing.T) string {
 	return s
 }
 
+func extractCertHashes(t *testing.T, addr ma.Multiaddr) []string {
+	var certHashesStr []string
+	ma.ForEach(addr, func(c ma.Component) bool {
+		if c.Protocol().Code == ma.P_CERTHASH {
+			certHashesStr = append(certHashesStr, c.Value())
+		}
+		return true
+	})
+	return certHashesStr
+}
+
 func TestTransport(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
 	tr, err := libp2pwebtransport.New(serverKey)
@@ -111,4 +122,19 @@ func TestListenAddrValidity(t *testing.T) {
 		_, err := tr.Listen(addr)
 		require.Errorf(t, err, "expected to not be able to listen on %s", addr)
 	}
+}
+
+func TestListenerAddrs(t *testing.T) {
+	_, key := newIdentity(t)
+	tr, err := libp2pwebtransport.New(key)
+	require.NoError(t, err)
+
+	ln1, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	ln2, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	hashes1 := extractCertHashes(t, ln1.Multiaddr())
+	require.Len(t, hashes1, 1)
+	hashes2 := extractCertHashes(t, ln2.Multiaddr())
+	require.Equal(t, hashes1, hashes2)
 }
