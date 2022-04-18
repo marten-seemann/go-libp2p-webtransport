@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/lucas-clemente/quic-go/http3"
 	"net"
 	"net/http"
 	"time"
@@ -12,7 +13,6 @@ import (
 
 	noise "github.com/libp2p/go-libp2p-noise"
 
-	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
@@ -70,22 +70,22 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config, transport tpt.Transpor
 		addr:         udpConn.LocalAddr(),
 		tlsConf:      tlsConf,
 		multiaddr:    localMultiaddr,
-	}
-	ln.ctx, ln.ctxCancel = context.WithCancel(context.Background())
-	server := webtransport.Server{
-		H3: http3.Server{
-			Server: &http.Server{
-				TLSConfig: tlsConf,
+		server: webtransport.Server{
+			H3: http3.Server{
+				Server: &http.Server{
+					TLSConfig: tlsConf,
+				},
 			},
 		},
 	}
+	ln.ctx, ln.ctxCancel = context.WithCancel(context.Background())
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello, world!"))
 	})
 	mux.HandleFunc(webtransportHTTPEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		// TODO: check ?type=multistream URL param
-		c, err := server.Upgrade(w, r)
+		c, err := ln.server.Upgrade(w, r)
 		if err != nil {
 			w.WriteHeader(500)
 			return
@@ -93,16 +93,15 @@ func newListener(laddr ma.Multiaddr, tlsConf *tls.Config, transport tpt.Transpor
 		// TODO: handle queue overflow
 		ln.queue <- c
 	})
-	server.H3.Handler = mux
+	ln.server.H3.Handler = mux
 	go func() {
 		defer close(ln.serverClosed)
 		defer func() { udpConn.Close() }()
-		if err := server.Serve(udpConn); err != nil {
+		if err := ln.server.Serve(udpConn); err != nil {
 			// TODO: only output if the server hasn't been closed
 			log.Debugw("serving failed", "addr", udpConn.LocalAddr(), "error", err)
 		}
 	}()
-	ln.server = server
 	return ln, nil
 }
 
