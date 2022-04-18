@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-multihash"
 	"sync"
 	"time"
 
@@ -19,6 +17,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	mafmt "github.com/multiformats/go-multiaddr-fmt"
 	manet "github.com/multiformats/go-multiaddr/net"
+	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multihash"
 )
 
 var log = logging.Logger("webtransport")
@@ -117,6 +117,19 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 var dialMatcher = mafmt.And(mafmt.IP, mafmt.Base(ma.P_UDP), mafmt.Base(ma.P_QUIC), mafmt.Base(ma.P_WEBTRANSPORT))
 
 func (t *transport) CanDial(addr ma.Multiaddr) bool {
+	var numHashes int
+	ma.ForEach(addr, func(c ma.Component) bool {
+		if c.Protocol().Code == ma.P_CERTHASH {
+			numHashes++
+		}
+		return true
+	})
+	if numHashes == 0 {
+		return false
+	}
+	for i := 0; i < numHashes; i++ {
+		addr, _ = ma.SplitLast(addr)
+	}
 	return dialMatcher.Matches(addr)
 }
 

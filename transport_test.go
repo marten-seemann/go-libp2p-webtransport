@@ -3,6 +3,7 @@ package libp2pwebtransport_test
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"testing"
 
@@ -11,22 +12,27 @@ import (
 
 	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multibase"
 	"github.com/stretchr/testify/require"
 )
 
+func newIdentity(t *testing.T) (peer.ID, ic.PrivKey) {
+	key, _, err := ic.GenerateEd25519Key(rand.Reader)
+	require.NoError(t, err)
+	id, err := peer.IDFromPrivateKey(key)
+	require.NoError(t, err)
+	return id, key
+}
+
 func TestTransport(t *testing.T) {
-	serverKey, _, err := ic.GenerateEd25519Key(rand.Reader)
-	require.NoError(t, err)
-	serverID, err := peer.IDFromPrivateKey(serverKey)
-	require.NoError(t, err)
+	serverID, serverKey := newIdentity(t)
 	tr, err := libp2pwebtransport.New(serverKey)
 	require.NoError(t, err)
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)
 
 	go func() {
-		clientKey, _, err := ic.GenerateEd25519Key(rand.Reader)
-		require.NoError(t, err)
+		_, clientKey := newIdentity(t)
 		tr2, err := libp2pwebtransport.New(clientKey)
 		require.NoError(t, err)
 		conn, err := tr2.Dial(context.Background(), ln.Multiaddr(), serverID)
@@ -45,4 +51,37 @@ func TestTransport(t *testing.T) {
 	data, err := io.ReadAll(str)
 	require.NoError(t, err)
 	require.Equal(t, "foobar", string(data))
+}
+
+func TestCanDial(t *testing.T) {
+	randomHash := func(t *testing.T) string {
+		b := make([]byte, 16)
+		rand.Read(b)
+		s, err := multibase.Encode(multibase.Base32hex, b)
+		require.NoError(t, err)
+		return s
+	}
+
+	valid := []ma.Multiaddr{
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/" + randomHash(t)),
+		ma.StringCast("/ip6/b16b:8255:efc6:9cd5:1a54:ee86:2d7a:c2e6/udp/1234/quic/webtransport/certhash/" + randomHash(t)),
+		ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s/certhash/%s/certhash/%s", randomHash(t), randomHash(t), randomHash(t))),
+	}
+
+	invalid := []ma.Multiaddr{
+		ma.StringCast("/ip4/127.0.0.1/udp/1234"),                   // missing webtransport
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/webtransport"),      // missing quic
+		ma.StringCast("/ip4/127.0.0.1/tcp/1234/webtransport"),      // WebTransport over TCP? Is this a joke?
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport"), // missing certificate hash
+	}
+
+	_, key := newIdentity(t)
+	tr, err := libp2pwebtransport.New(key)
+	require.NoError(t, err)
+	for _, addr := range valid {
+		require.Truef(t, tr.CanDial(addr), "expected to be able to dial %s", addr)
+	}
+	for _, addr := range invalid {
+		require.Falsef(t, tr.CanDial(addr), "expected to not be able to dial %s", addr)
+	}
 }
