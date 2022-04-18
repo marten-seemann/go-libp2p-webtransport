@@ -14,7 +14,6 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
-	mafmt "github.com/multiformats/go-multiaddr-fmt"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
@@ -109,8 +108,6 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	return newConn(t, wconn, t.privKey, sconn.RemotePublicKey())
 }
 
-var dialMatcher = mafmt.And(mafmt.IP, mafmt.Base(ma.P_UDP), mafmt.Base(ma.P_QUIC), mafmt.Base(ma.P_WEBTRANSPORT))
-
 func (t *transport) CanDial(addr ma.Multiaddr) bool {
 	var numHashes int
 	ma.ForEach(addr, func(c ma.Component) bool {
@@ -125,10 +122,13 @@ func (t *transport) CanDial(addr ma.Multiaddr) bool {
 	for i := 0; i < numHashes; i++ {
 		addr, _ = ma.SplitLast(addr)
 	}
-	return dialMatcher.Matches(addr)
+	return webtransportMatcher.Matches(addr)
 }
 
 func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
+	if !webtransportMatcher.Matches(laddr) {
+		return nil, fmt.Errorf("cannot listen on non-WebTransport addr: %s", laddr)
+	}
 	return newListener(laddr, t.tlsConf, t, t.noise)
 }
 

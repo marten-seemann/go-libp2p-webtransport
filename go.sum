@@ -136,8 +136,8 @@ github.com/marten-seemann/qtls-go1-17 v0.1.1 h1:DQjHPq+aOzUeh9/lixAGunn6rIOQyWCh
 github.com/marten-seemann/qtls-go1-17 v0.1.1/go.mod h1:C2ekUKcDdz9SDWxec1N/MvcXBpaX9l3Nx67XaR84L5s=
 github.com/marten-seemann/qtls-go1-18 v0.1.1 h1:qp7p7XXUFL7fpBvSS1sWD+uSqPvzNQK43DH+/qEkj0Y=
 github.com/marten-seemann/qtls-go1-18 v0.1.1/go.mod h1:mJttiymBAByA49mhlNZZGrH5u1uXYZJ+RW28Py7f4m4=
-github.com/marten-seemann/webtransport-go v0.0.0-20220416132047-fe38928b4067 h1:gxBmAV+DeYHMM0bjpd/5Q3LUWXJcYcVZFqfXsYpUDJ8=
-github.com/marten-seemann/webtransport-go v0.0.0-20220416132047-fe38928b4067/go.mod h1:mhd552LYk0KuMWterzRBRSEFEYTN2pxMrw/OBJVxBxY=
+github.com/marten-seemann/webtransport-go v0.0.0-20220418224708-d5ad5372f4de h1:3EG59Vebo2Ldxrynq5zcJJZENQF3AZWqaQNAI+jSSpQ=
+github.com/marten-seemann/webtransport-go v0.0.0-20220418224708-d5ad5372f4de/go.mod h1:mhd552LYk0KuMWterzRBRSEFEYTN2pxMrw/OBJVxBxY=
 github.com/mattn/go-isatty v0.0.14 h1:yVuAays6BHfxijgZPzw+3Zlu5yQgKGP2/hcQbHb7S9Y=
 github.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27kJ6hsGG94=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=

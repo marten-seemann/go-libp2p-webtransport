@@ -7,7 +7,7 @@ require (
 	github.com/libp2p/go-libp2p-core v0.14.0
 	github.com/libp2p/go-libp2p-noise v0.3.0
 	github.com/lucas-clemente/quic-go v0.27.1-0.20220416130901-6d4a69418397
-	github.com/marten-seemann/webtransport-go v0.0.0-20220416132047-fe38928b4067
+	github.com/marten-seemann/webtransport-go v0.0.0-20220418224708-d5ad5372f4de
 	github.com/multiformats/go-multiaddr v0.5.1-0.20220406114920-a07348aac403
 	github.com/multiformats/go-multiaddr-fmt v0.1.0
 	github.com/multiformats/go-multibase v0.0.3

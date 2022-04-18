@@ -24,6 +24,14 @@ func newIdentity(t *testing.T) (peer.ID, ic.PrivKey) {
 	return id, key
 }
 
+func randomMultihash(t *testing.T) string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	s, err := multibase.Encode(multibase.Base32hex, b)
+	require.NoError(t, err)
+	return s
+}
+
 func TestTransport(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
 	tr, err := libp2pwebtransport.New(serverKey)
@@ -54,18 +62,10 @@ func TestTransport(t *testing.T) {
 }
 
 func TestCanDial(t *testing.T) {
-	randomHash := func(t *testing.T) string {
-		b := make([]byte, 16)
-		rand.Read(b)
-		s, err := multibase.Encode(multibase.Base32hex, b)
-		require.NoError(t, err)
-		return s
-	}
-
 	valid := []ma.Multiaddr{
-		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/" + randomHash(t)),
-		ma.StringCast("/ip6/b16b:8255:efc6:9cd5:1a54:ee86:2d7a:c2e6/udp/1234/quic/webtransport/certhash/" + randomHash(t)),
-		ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s/certhash/%s/certhash/%s", randomHash(t), randomHash(t), randomHash(t))),
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/" + randomMultihash(t)),
+		ma.StringCast("/ip6/b16b:8255:efc6:9cd5:1a54:ee86:2d7a:c2e6/udp/1234/quic/webtransport/certhash/" + randomMultihash(t)),
+		ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s/certhash/%s/certhash/%s", randomMultihash(t), randomMultihash(t), randomMultihash(t))),
 	}
 
 	invalid := []ma.Multiaddr{
@@ -83,5 +83,32 @@ func TestCanDial(t *testing.T) {
 	}
 	for _, addr := range invalid {
 		require.Falsef(t, tr.CanDial(addr), "expected to not be able to dial %s", addr)
+	}
+}
+
+func TestListenAddrValidity(t *testing.T) {
+	valid := []ma.Multiaddr{
+		ma.StringCast("/ip6/::/udp/0/quic/webtransport/"),
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport/"),
+	}
+
+	invalid := []ma.Multiaddr{
+		ma.StringCast("/ip4/127.0.0.1/udp/1234"),              // missing webtransport
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/webtransport"), // missing quic
+		ma.StringCast("/ip4/127.0.0.1/tcp/1234/webtransport"), // WebTransport over TCP? Is this a joke?
+		ma.StringCast("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/" + randomMultihash(t)),
+	}
+
+	_, key := newIdentity(t)
+	tr, err := libp2pwebtransport.New(key)
+	require.NoError(t, err)
+	for _, addr := range valid {
+		ln, err := tr.Listen(addr)
+		require.NoErrorf(t, err, "expected to be able to listen on %s", addr)
+		ln.Close()
+	}
+	for _, addr := range invalid {
+		_, err := tr.Listen(addr)
+		require.Errorf(t, err, "expected to not be able to listen on %s", addr)
 	}
 }
