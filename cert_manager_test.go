@@ -3,6 +3,7 @@ package libp2pwebtransport
 import (
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
+	"os"
 	"testing"
 	"time"
 
@@ -48,7 +49,10 @@ func TestInitialCert(t *testing.T) {
 }
 
 func TestCertRenewal(t *testing.T) {
-	const certValidity = 300 * time.Millisecond
+	var certValidity = 300 * time.Millisecond
+	if os.Getenv("CI") != "" {
+		certValidity = 2 * time.Second
+	}
 	m, err := newCertManager(certValidity)
 	require.NoError(t, err)
 	defer m.Close()
