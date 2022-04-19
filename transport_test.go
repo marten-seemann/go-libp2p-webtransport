@@ -47,6 +47,7 @@ func TestTransport(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
 	tr, err := libp2pwebtransport.New(serverKey)
 	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)
 
@@ -54,6 +55,8 @@ func TestTransport(t *testing.T) {
 		_, clientKey := newIdentity(t)
 		tr2, err := libp2pwebtransport.New(clientKey)
 		require.NoError(t, err)
+		defer tr2.(io.Closer).Close()
+
 		conn, err := tr2.Dial(context.Background(), ln.Multiaddr(), serverID)
 		require.NoError(t, err)
 		str, err := conn.OpenStream(context.Background())
@@ -89,6 +92,8 @@ func TestCanDial(t *testing.T) {
 	_, key := newIdentity(t)
 	tr, err := libp2pwebtransport.New(key)
 	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+
 	for _, addr := range valid {
 		require.Truef(t, tr.CanDial(addr), "expected to be able to dial %s", addr)
 	}
@@ -113,6 +118,8 @@ func TestListenAddrValidity(t *testing.T) {
 	_, key := newIdentity(t)
 	tr, err := libp2pwebtransport.New(key)
 	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+
 	for _, addr := range valid {
 		ln, err := tr.Listen(addr)
 		require.NoErrorf(t, err, "expected to be able to listen on %s", addr)
@@ -128,6 +135,7 @@ func TestListenerAddrs(t *testing.T) {
 	_, key := newIdentity(t)
 	tr, err := libp2pwebtransport.New(key)
 	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
 
 	ln1, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)

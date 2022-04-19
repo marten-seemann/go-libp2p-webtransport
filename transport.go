@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ type transport struct {
 }
 
 var _ tpt.Transport = &transport{}
+var _ io.Closer = &transport{}
 
 func New(key ic.PrivKey) (tpt.Transport, error) {
 	id, err := peer.IDFromPrivateKey(key)
@@ -142,4 +144,12 @@ func (t *transport) Protocols() []int {
 
 func (t *transport) Proxy() bool {
 	return false
+}
+
+func (t *transport) Close() error {
+	t.listenOnce.Do(func() {})
+	if t.certManager != nil {
+		return t.certManager.Close()
+	}
+	return nil
 }
