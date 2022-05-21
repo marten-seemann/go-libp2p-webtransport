@@ -70,11 +70,9 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		multiaddr:    localMultiaddr,
 		server: webtransport.Server{
 			H3: http3.Server{
-				Server: &http.Server{
-					TLSConfig: &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
-						return certManager.GetConfig(), nil
-					}},
-				},
+				TLSConfig: &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+					return certManager.GetConfig(), nil
+				}},
 			},
 		},
 	}
@@ -92,6 +90,8 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		}
 		// TODO: handle queue overflow
 		ln.queue <- c
+		// We need to block until we're done with this WebTransport session.
+		<-c.Context().Done()
 	})
 	ln.server.H3.Handler = mux
 	go func() {

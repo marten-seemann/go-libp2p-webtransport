@@ -124,9 +124,8 @@ github.com/libp2p/go-maddr-filter v0.1.0/go.mod h1:VzZhTXkMucEGGEOSKddrwGiOv0tUh
 github.com/libp2p/go-msgio v0.0.6/go.mod h1:4ecVB6d9f4BDSL5fqvPiC4A3KivjWn+Venn/1ALLMWA=
 github.com/libp2p/go-openssl v0.0.7 h1:eCAzdLejcNVBzP/iZM9vqHnQm+XyCEbSSIheIPRGNsw=
 github.com/libp2p/go-openssl v0.0.7/go.mod h1:unDrJpgy3oFr+rqXsarWifmJuNnJR4chtO1HmaZjggc=
-github.com/lucas-clemente/quic-go v0.27.1-0.20220416130901-6d4a69418397/go.mod h1:AzgQoPda7N+3IqMMMkywBKggIFo2KT6pfnlrQ2QieeI=
-github.com/lucas-clemente/quic-go v0.27.1-0.20220419192515-a47a1fcc2005 h1:fEZ94c0RdMhLV76eILnfBSLUPNmEkTknbEJB364gRqo=
-github.com/lucas-clemente/quic-go v0.27.1-0.20220419192515-a47a1fcc2005/go.mod h1:AzgQoPda7N+3IqMMMkywBKggIFo2KT6pfnlrQ2QieeI=
+github.com/lucas-clemente/quic-go v0.27.1-0.20220520111257-8185d1b4e072 h1:s2A290bfKQCyFrBjpWti5klxhHgWOLfyV8LX3PfeVBM=
+github.com/lucas-clemente/quic-go v0.27.1-0.20220520111257-8185d1b4e072/go.mod h1:AzgQoPda7N+3IqMMMkywBKggIFo2KT6pfnlrQ2QieeI=
 github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm/+2c2E2WMI=
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/marten-seemann/qpack v0.2.1 h1:jvTsT/HpCn2UZJdP+UUB53FfUUgeOyG5K1ns0OJOGVs=
@@ -137,8 +136,8 @@ github.com/marten-seemann/qtls-go1-17 v0.1.1 h1:DQjHPq+aOzUeh9/lixAGunn6rIOQyWCh
 github.com/marten-seemann/qtls-go1-17 v0.1.1/go.mod h1:C2ekUKcDdz9SDWxec1N/MvcXBpaX9l3Nx67XaR84L5s=
 github.com/marten-seemann/qtls-go1-18 v0.1.1 h1:qp7p7XXUFL7fpBvSS1sWD+uSqPvzNQK43DH+/qEkj0Y=
 github.com/marten-seemann/qtls-go1-18 v0.1.1/go.mod h1:mJttiymBAByA49mhlNZZGrH5u1uXYZJ+RW28Py7f4m4=
-github.com/marten-seemann/webtransport-go v0.0.0-20220418224708-d5ad5372f4de h1:3EG59Vebo2Ldxrynq5zcJJZENQF3AZWqaQNAI+jSSpQ=
-github.com/marten-seemann/webtransport-go v0.0.0-20220418224708-d5ad5372f4de/go.mod h1:mhd552LYk0KuMWterzRBRSEFEYTN2pxMrw/OBJVxBxY=
+github.com/marten-seemann/webtransport-go v0.0.0-20220521192150-91db90f3a44c h1:8mdIiCkptzDIAVfaA3pAdsUljkc4ctKkJkm7C8Rcoqw=
+github.com/marten-seemann/webtransport-go v0.0.0-20220521192150-91db90f3a44c/go.mod h1:NeoML6Xpw+lfujs0++t/vG/WKxjyKmqQwJiaOFfWGn8=
 github.com/mattn/go-isatty v0.0.14 h1:yVuAays6BHfxijgZPzw+3Zlu5yQgKGP2/hcQbHb7S9Y=
 github.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27kJ6hsGG94=
 github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5Ld7szi9bcBfOoFv/3dc6xSMkL2PC0=
