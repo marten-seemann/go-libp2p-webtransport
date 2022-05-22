@@ -38,7 +38,7 @@ type listener struct {
 	addr      net.Addr
 	multiaddr ma.Multiaddr
 
-	queue chan *webtransport.Conn
+	queue chan tpt.CapableConn
 }
 
 var _ tpt.Listener = &listener{}
@@ -64,7 +64,7 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		transport:    transport,
 		noise:        noise,
 		certManager:  certManager,
-		queue:        make(chan *webtransport.Conn, queueLen),
+		queue:        make(chan tpt.CapableConn, queueLen),
 		serverClosed: make(chan struct{}),
 		addr:         udpConn.LocalAddr(),
 		multiaddr:    localMultiaddr,
@@ -88,8 +88,16 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 			w.WriteHeader(500)
 			return
 		}
-		// TODO: handle queue overflow
-		ln.queue <- c
+		ctx, cancel := context.WithTimeout(ln.ctx, handshakeTimeout)
+		conn, err := ln.handshake(ctx, c)
+		if err != nil {
+			cancel()
+			log.Debugw("handshake failed", "error", err)
+			c.Close()
+			return
+		}
+		cancel()
+		ln.queue <- conn
 		// We need to block until we're done with this WebTransport session.
 		<-c.Context().Done()
 	})
@@ -106,34 +114,11 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 }
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
-	queue := make(chan tpt.CapableConn, queueLen)
-	for {
-		select {
-		case <-l.ctx.Done():
-			return nil, errClosed
-		default:
-		}
-
-		var c *webtransport.Conn
-		select {
-		case c = <-l.queue:
-			go func(c *webtransport.Conn) {
-				ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
-				defer cancel()
-				conn, err := l.handshake(ctx, c)
-				if err != nil {
-					log.Debugw("handshake failed", "error", err)
-					c.Close()
-					return
-				}
-				// TODO: handle queue overflow
-				queue <- conn
-			}(c)
-		case conn := <-queue:
-			return conn, nil
-		case <-l.ctx.Done():
-			return nil, errClosed
-		}
+	select {
+	case <-l.ctx.Done():
+		return nil, errClosed
+	case c := <-l.queue:
+		return c, nil
 	}
 }
 
