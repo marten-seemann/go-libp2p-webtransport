@@ -94,24 +94,33 @@ func TestHashVerification(t *testing.T) {
 		require.Error(t, err)
 	}()
 
-	// replace the certificate hash in the multiaddr with a fake hash
-	addr, _ := ma.SplitLast(ln.Multiaddr())
-	h := sha256.Sum256([]byte("foobar"))
-	mh, err := multihash.Encode(h[:], multihash.SHA2_256)
-	require.NoError(t, err)
-	certStr, err := multibase.Encode(multibase.Base58BTC, mh)
-	require.NoError(t, err)
-	comp, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, certStr)
-	require.NoError(t, err)
-	addr = addr.Encapsulate(comp)
-
 	_, clientKey := newIdentity(t)
 	tr2, err := libp2pwebtransport.New(clientKey)
 	require.NoError(t, err)
 	defer tr2.(io.Closer).Close()
 
-	_, err = tr2.Dial(context.Background(), addr, serverID)
-	require.Error(t, err)
+	// create a hash component using the SHA256 of foobar
+	h := sha256.Sum256([]byte("foobar"))
+	mh, err := multihash.Encode(h[:], multihash.SHA2_256)
+	require.NoError(t, err)
+	certStr, err := multibase.Encode(multibase.Base58BTC, mh)
+	require.NoError(t, err)
+	foobarHash, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, certStr)
+	require.NoError(t, err)
+
+	t.Run("fails using only a wrong hash", func(t *testing.T) {
+		// replace the certificate hash in the multiaddr with a fake hash
+		addr, _ := ma.SplitLast(ln.Multiaddr())
+		addr = addr.Encapsulate(foobarHash)
+
+		_, err := tr2.Dial(context.Background(), addr, serverID)
+		require.Error(t, err)
+	})
+
+	t.Run("fails when adding a wrong hash", func(t *testing.T) {
+		_, err := tr2.Dial(context.Background(), ln.Multiaddr().Encapsulate(foobarHash), serverID)
+		require.Error(t, err)
+	})
 
 	require.NoError(t, ln.Close())
 	<-done
