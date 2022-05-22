@@ -96,7 +96,6 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	if err != nil {
 		return nil, err
 	}
-	defer rsp.Body.Close()
 	if rsp.StatusCode < 200 || rsp.StatusCode > 299 {
 		return nil, fmt.Errorf("invalid response status code: %d", rsp.StatusCode)
 	}
