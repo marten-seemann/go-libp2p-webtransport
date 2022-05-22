@@ -8,17 +8,21 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/marten-seemann/go-libp2p-webtransport/pb"
+
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
+
 	noise "github.com/libp2p/go-libp2p-noise"
 
-	logging "github.com/ipfs/go-log/v2"
-	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
+
+	logging "github.com/ipfs/go-log/v2"
+	"github.com/marten-seemann/webtransport-go"
 )
 
 var log = logging.Logger("webtransport")
@@ -48,18 +52,19 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
-	noise, err := noise.New(key)
-	if err != nil {
-		return nil, err
-	}
-	return &transport{
+	t := &transport{
 		pid:     id,
 		privKey: key,
 		dialer: webtransport.Dialer{
 			TLSClientConf: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
 		},
-		noise: noise,
-	}, nil
+	}
+	noise, err := noise.New(key, noise.WithEarlyDataHandler(t.checkEarlyData))
+	if err != nil {
+		return nil, err
+	}
+	t.noise = noise
+	return t, nil
 }
 
 func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tpt.CapableConn, error) {
@@ -99,13 +104,41 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	if err != nil {
 		return nil, err
 	}
-	// TODO: use early data and verify the cert hash
-	_ = certHashes
-	sconn, err := t.noise.SecureOutbound(ctx, &webtransportStream{Stream: str, wconn: wconn}, p)
+
+	// Now run a Noise handshake (using early data) and verify the cert hash.
+	msg := pb.WebTransport{CertHashes: make([][]byte, 0, len(certHashes))}
+	for _, certHash := range certHashes {
+		h, err := multihash.Encode(certHash.Digest, certHash.Code)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode certificate hash: %w", err)
+		}
+		msg.CertHashes = append(msg.CertHashes, h)
+	}
+	msgBytes, err := msg.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal WebTransport protobuf: %w", err)
+	}
+	sconn, err := t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wconn: wconn}, p, msgBytes)
 	if err != nil {
 		return nil, err
 	}
 	return newConn(t, wconn, t.privKey, sconn.RemotePublicKey())
+}
+
+func (t *transport) checkEarlyData(b []byte) error {
+	var msg pb.WebTransport
+	if err := msg.Unmarshal(b); err != nil {
+		return fmt.Errorf("failed to unmarshal early data protobuf: %w", err)
+	}
+	hashes := make([]multihash.DecodedMultihash, 0, len(msg.CertHashes))
+	for _, h := range msg.CertHashes {
+		dh, err := multihash.Decode(h)
+		if err != nil {
+			return fmt.Errorf("failed to decode hash: %w", err)
+		}
+		hashes = append(hashes, *dh)
+	}
+	return t.certManager.Verify(hashes)
 }
 
 func (t *transport) CanDial(addr ma.Multiaddr) bool {

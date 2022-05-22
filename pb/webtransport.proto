@@ -1,0 +1,5 @@
+syntax = "proto2";
+
+message WebTransport {
+  repeated bytes cert_hashes = 1;
+}

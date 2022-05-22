@@ -1,10 +1,11 @@
 package libp2pwebtransport
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
+	"fmt"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type certConfig struct {
 	start, end time.Time
 	tlsConf    *tls.Config
+	sha256     [32]byte // cached from the tlsConf
 }
 
 func newCertConfig(start, end time.Time, conf *tls.Config) (*certConfig, error) {
@@ -23,6 +25,7 @@ func newCertConfig(start, end time.Time, conf *tls.Config) (*certConfig, error) 
 		start:   start,
 		end:     end,
 		tlsConf: conf,
+		sha256:  sha256.Sum256(conf.Certificates[0].Leaf.Raw),
 	}, nil
 }
 
@@ -128,13 +131,27 @@ func (m *certManager) AddrComponent() ma.Multiaddr {
 	return m.addrComp
 }
 
+func (m *certManager) Verify(hashes []multihash.DecodedMultihash) error {
+	for _, h := range hashes {
+		if h.Code != multihash.SHA2_256 {
+			return fmt.Errorf("expected SHA256 hash, got %d", h.Code)
+		}
+		if !bytes.Equal(h.Digest, m.currentConfig.sha256[:]) &&
+			(m.nextConfig == nil || !bytes.Equal(h.Digest, m.nextConfig.sha256[:])) &&
+			(m.lastConfig == nil || !bytes.Equal(h.Digest, m.lastConfig.sha256[:])) {
+			return fmt.Errorf("found unexpected hash: %+x", h.Digest)
+		}
+	}
+	return nil
+}
+
 func (m *certManager) cacheAddrComponent() error {
-	addr, err := m.addrComponentForCert(m.currentConfig.tlsConf.Certificates[0].Leaf)
+	addr, err := m.addrComponentForCert(m.currentConfig.sha256[:])
 	if err != nil {
 		return err
 	}
 	if m.nextConfig != nil {
-		comp, err := m.addrComponentForCert(m.nextConfig.tlsConf.Certificates[0].Leaf)
+		comp, err := m.addrComponentForCert(m.nextConfig.sha256[:])
 		if err != nil {
 			return err
 		}
@@ -144,9 +161,8 @@ func (m *certManager) cacheAddrComponent() error {
 	return nil
 }
 
-func (m *certManager) addrComponentForCert(cert *x509.Certificate) (ma.Multiaddr, error) {
-	hash := sha256.Sum256(cert.Raw)
-	mh, err := multihash.Encode(hash[:], multihash.SHA2_256)
+func (m *certManager) addrComponentForCert(hash []byte) (ma.Multiaddr, error) {
+	mh, err := multihash.Encode(hash, multihash.SHA2_256)
 	if err != nil {
 		return nil, err
 	}

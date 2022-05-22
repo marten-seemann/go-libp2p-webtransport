@@ -3,16 +3,20 @@ package libp2pwebtransport_test
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"testing"
 
+	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
+
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 
-	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multihash"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,6 +54,7 @@ func TestTransport(t *testing.T) {
 	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)
+	defer ln.Close()
 
 	go func() {
 		_, clientKey := newIdentity(t)
@@ -73,6 +78,43 @@ func TestTransport(t *testing.T) {
 	data, err := io.ReadAll(str)
 	require.NoError(t, err)
 	require.Equal(t, "foobar", string(data))
+}
+
+func TestHashVerification(t *testing.T) {
+	serverID, serverKey := newIdentity(t)
+	tr, err := libp2pwebtransport.New(serverKey)
+	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := ln.Accept()
+		require.Error(t, err)
+	}()
+
+	// replace the certificate hash in the multiaddr with a fake hash
+	addr, _ := ma.SplitLast(ln.Multiaddr())
+	h := sha256.Sum256([]byte("foobar"))
+	mh, err := multihash.Encode(h[:], multihash.SHA2_256)
+	require.NoError(t, err)
+	certStr, err := multibase.Encode(multibase.Base58BTC, mh)
+	require.NoError(t, err)
+	comp, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, certStr)
+	require.NoError(t, err)
+	addr = addr.Encapsulate(comp)
+
+	_, clientKey := newIdentity(t)
+	tr2, err := libp2pwebtransport.New(clientKey)
+	require.NoError(t, err)
+	defer tr2.(io.Closer).Close()
+
+	_, err = tr2.Dial(context.Background(), addr, serverID)
+	require.Error(t, err)
+
+	require.NoError(t, ln.Close())
+	<-done
 }
 
 func TestCanDial(t *testing.T) {

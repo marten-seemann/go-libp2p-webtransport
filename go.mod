@@ -3,9 +3,10 @@ module github.com/marten-seemann/go-libp2p-webtransport
 go 1.17
 
 require (
+	github.com/gogo/protobuf v1.3.2
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/libp2p/go-libp2p-core v0.14.0
-	github.com/libp2p/go-libp2p-noise v0.3.0
+	github.com/libp2p/go-libp2p-noise v0.3.1-0.20220416173527-fe671ac5d0fc
 	github.com/lucas-clemente/quic-go v0.27.1-0.20220520111257-8185d1b4e072
 	github.com/marten-seemann/webtransport-go v0.0.0-20220521192150-91db90f3a44c
 	github.com/multiformats/go-multiaddr v0.5.1-0.20220406114920-a07348aac403
@@ -22,7 +23,6 @@ require (
 	github.com/flynn/noise v1.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/ipfs/go-cid v0.0.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.4 // indirect
 	github.com/libp2p/go-buffer-pool v0.0.2 // indirect
