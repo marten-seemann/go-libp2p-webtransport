@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
@@ -14,6 +15,7 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
 
@@ -56,6 +58,7 @@ func TestTransport(t *testing.T) {
 	require.NoError(t, err)
 	defer ln.Close()
 
+	addrChan := make(chan ma.Multiaddr)
 	go func() {
 		_, clientKey := newIdentity(t)
 		tr2, err := libp2pwebtransport.New(clientKey)
@@ -69,6 +72,13 @@ func TestTransport(t *testing.T) {
 		_, err = str.Write([]byte("foobar"))
 		require.NoError(t, err)
 		require.NoError(t, str.Close())
+
+		// check RemoteMultiaddr
+		_, addr, err := manet.DialArgs(ln.Multiaddr())
+		require.NoError(t, err)
+		port := strings.Split(addr, ":")[1]
+		require.Equal(t, ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", port)), conn.RemoteMultiaddr())
+		addrChan <- conn.RemoteMultiaddr()
 	}()
 
 	conn, err := ln.Accept()
@@ -78,6 +88,7 @@ func TestTransport(t *testing.T) {
 	data, err := io.ReadAll(str)
 	require.NoError(t, err)
 	require.Equal(t, "foobar", string(data))
+	require.Equal(t, <-addrChan, conn.LocalMultiaddr())
 }
 
 func TestHashVerification(t *testing.T) {
