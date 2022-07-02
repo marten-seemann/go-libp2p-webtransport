@@ -16,13 +16,13 @@ import (
 
 	noise "github.com/libp2p/go-libp2p-noise"
 
+	logging "github.com/ipfs/go-log/v2"
+	"github.com/lucas-clemente/quic-go/http3"
+	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
-
-	logging "github.com/ipfs/go-log/v2"
-	"github.com/marten-seemann/webtransport-go"
 )
 
 var log = logging.Logger("webtransport")
@@ -56,7 +56,9 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 		pid:     id,
 		privKey: key,
 		dialer: webtransport.Dialer{
-			TLSClientConf: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
+			RoundTripper: &http3.RoundTripper{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
+			},
 		},
 	}
 	noise, err := noise.New(key, noise.WithEarlyDataHandler(t.checkEarlyData))
@@ -117,7 +119,7 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal WebTransport protobuf: %w", err)
 	}
-	sconn, err := t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wconn: wconn}, p, msgBytes)
+	sconn, err := t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wsess: wconn}, p, msgBytes)
 	if err != nil {
 		return nil, err
 	}

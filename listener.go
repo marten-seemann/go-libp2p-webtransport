@@ -122,16 +122,16 @@ func (l *listener) Accept() (tpt.CapableConn, error) {
 	}
 }
 
-func (l *listener) handshake(ctx context.Context, c *webtransport.Conn) (tpt.CapableConn, error) {
-	str, err := c.AcceptStream(ctx)
+func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (tpt.CapableConn, error) {
+	str, err := sess.AcceptStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wconn: c}, "")
+	conn, err := l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wsess: sess}, "")
 	if err != nil {
 		return nil, err
 	}
-	return newConn(l.transport, c, conn.LocalPrivateKey(), conn.RemotePublicKey())
+	return newConn(l.transport, sess, conn.LocalPrivateKey(), conn.RemotePublicKey())
 }
 
 func (l *listener) Addr() net.Addr {

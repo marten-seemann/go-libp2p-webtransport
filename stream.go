@@ -15,17 +15,17 @@ const (
 
 type webtransportStream struct {
 	webtransport.Stream
-	wconn *webtransport.Conn
+	wsess *webtransport.Session
 }
 
 var _ net.Conn = &webtransportStream{}
 
 func (s *webtransportStream) LocalAddr() net.Addr {
-	return s.wconn.LocalAddr()
+	return s.wsess.LocalAddr()
 }
 
 func (s *webtransportStream) RemoteAddr() net.Addr {
-	return s.wconn.RemoteAddr()
+	return s.wsess.RemoteAddr()
 }
 
 type stream struct {

@@ -15,7 +15,7 @@ import (
 
 type conn struct {
 	transport tpt.Transport
-	wconn     *webtransport.Conn
+	wsess     *webtransport.Session
 
 	localPeer, remotePeer peer.ID
 	local, remote         ma.Multiaddr
@@ -23,7 +23,7 @@ type conn struct {
 	remotePubKey          ic.PubKey
 }
 
-func newConn(tr tpt.Transport, wconn *webtransport.Conn, privKey ic.PrivKey, remotePubKey ic.PubKey) (*conn, error) {
+func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, remotePubKey ic.PubKey) (*conn, error) {
 	localPeer, err := peer.IDFromPrivateKey(privKey)
 	if err != nil {
 		return nil, err
@@ -32,17 +32,17 @@ func newConn(tr tpt.Transport, wconn *webtransport.Conn, privKey ic.PrivKey, rem
 	if err != nil {
 		return nil, err
 	}
-	local, err := toWebtransportMultiaddr(wconn.LocalAddr())
+	local, err := toWebtransportMultiaddr(wsess.LocalAddr())
 	if err != nil {
 		return nil, fmt.Errorf("error determiniting local addr: %w", err)
 	}
-	remote, err := toWebtransportMultiaddr(wconn.RemoteAddr())
+	remote, err := toWebtransportMultiaddr(wsess.RemoteAddr())
 	if err != nil {
 		return nil, fmt.Errorf("error determiniting remote addr: %w", err)
 	}
 	return &conn{
 		transport:    tr,
-		wconn:        wconn,
+		wsess:        wsess,
 		privKey:      privKey,
 		localPeer:    localPeer,
 		remotePeer:   remotePeer,
@@ -55,7 +55,7 @@ func newConn(tr tpt.Transport, wconn *webtransport.Conn, privKey ic.PrivKey, rem
 var _ tpt.CapableConn = &conn{}
 
 func (c *conn) Close() error {
-	return c.wconn.Close()
+	return c.wsess.Close()
 }
 
 func (c *conn) IsClosed() bool {
@@ -63,12 +63,12 @@ func (c *conn) IsClosed() bool {
 }
 
 func (c *conn) OpenStream(ctx context.Context) (network.MuxedStream, error) {
-	str, err := c.wconn.OpenStreamSync(ctx)
+	str, err := c.wsess.OpenStreamSync(ctx)
 	return &stream{str}, err
 }
 
 func (c *conn) AcceptStream() (network.MuxedStream, error) {
-	str, err := c.wconn.AcceptStream(context.Background())
+	str, err := c.wsess.AcceptStream(context.Background())
 	return &stream{str}, err
 }
 
