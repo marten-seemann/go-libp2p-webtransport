@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"io"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -30,6 +30,21 @@ var log = logging.Logger("webtransport")
 const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
 const certValidity = 14 * 24 * time.Hour
+
+type connSecurityMultiaddrs interface {
+	network.ConnMultiaddrs
+	network.ConnSecurity
+}
+
+type connSecurityMultiaddrsImpl struct {
+	network.ConnSecurity
+	local, remote ma.Multiaddr
+}
+
+var _ connSecurityMultiaddrs = &connSecurityMultiaddrsImpl{}
+
+func (c *connSecurityMultiaddrsImpl) LocalMultiaddr() ma.Multiaddr  { return c.local }
+func (c *connSecurityMultiaddrsImpl) RemoteMultiaddr() ma.Multiaddr { return c.remote }
 
 type transport struct {
 	privKey ic.PrivKey
@@ -104,13 +119,8 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		scope.Done()
 		return nil, err
 	}
-	c, err := newConn(t, sess, t.privKey, sconn.RemotePublicKey(), scope)
-	if err != nil {
-		sess.Close()
-		scope.Done()
-		return nil, err
-	}
-	return c, nil
+
+	return newConn(t, sess, sconn, scope), nil
 }
 
 func (t *transport) dial(ctx context.Context, addr string) (*webtransport.Session, error) {
@@ -125,7 +135,16 @@ func (t *transport) dial(ctx context.Context, addr string) (*webtransport.Sessio
 	return sess, err
 }
 
-func (t *transport) upgrade(ctx context.Context, sess *webtransport.Session, p peer.ID, certHashes []multihash.DecodedMultihash) (network.ConnSecurity, error) {
+func (t *transport) upgrade(ctx context.Context, sess *webtransport.Session, p peer.ID, certHashes []multihash.DecodedMultihash) (connSecurityMultiaddrs, error) {
+	local, err := toWebtransportMultiaddr(sess.LocalAddr())
+	if err != nil {
+		return nil, fmt.Errorf("error determiniting local addr: %w", err)
+	}
+	remote, err := toWebtransportMultiaddr(sess.RemoteAddr())
+	if err != nil {
+		return nil, fmt.Errorf("error determiniting remote addr: %w", err)
+	}
+
 	str, err := sess.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
@@ -144,7 +163,15 @@ func (t *transport) upgrade(ctx context.Context, sess *webtransport.Session, p p
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal WebTransport protobuf: %w", err)
 	}
-	return t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wsess: sess}, p, msgBytes)
+	c, err := t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wsess: sess}, p, msgBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &connSecurityMultiaddrsImpl{
+		ConnSecurity: c,
+		local:        local,
+		remote:       remote,
+	}, nil
 }
 
 func (t *transport) checkEarlyData(b []byte) error {
