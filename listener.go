@@ -81,25 +81,7 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello, world!"))
 	})
-	mux.HandleFunc(webtransportHTTPEndpoint, func(w http.ResponseWriter, r *http.Request) {
-		// TODO: check ?type=multistream URL param
-		c, err := ln.server.Upgrade(w, r)
-		if err != nil {
-			w.WriteHeader(500)
-			return
-		}
-		ctx, cancel := context.WithTimeout(ln.ctx, handshakeTimeout)
-		conn, err := ln.handshake(ctx, c)
-		if err != nil {
-			cancel()
-			log.Debugw("handshake failed", "error", err)
-			c.Close()
-			return
-		}
-		cancel()
-		// TODO: think about what happens when this channel fills up
-		ln.queue <- conn
-	})
+	mux.HandleFunc(webtransportHTTPEndpoint, ln.httpHandler)
 	ln.server.H3.Handler = mux
 	go func() {
 		defer close(ln.serverClosed)
@@ -110,6 +92,26 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		}
 	}()
 	return ln, nil
+}
+
+func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
+	// TODO: check ?type=multistream URL param
+	c, err := l.server.Upgrade(w, r)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
+	conn, err := l.handshake(ctx, c)
+	if err != nil {
+		cancel()
+		log.Debugw("handshake failed", "error", err)
+		c.Close()
+		return
+	}
+	cancel()
+	// TODO: think about what happens when this channel fills up
+	l.queue <- conn
 }
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
