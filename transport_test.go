@@ -89,12 +89,15 @@ func TestTransport(t *testing.T) {
 
 	conn, err := ln.Accept()
 	require.NoError(t, err)
+	require.False(t, conn.IsClosed())
 	str, err := conn.AcceptStream()
 	require.NoError(t, err)
 	data, err := io.ReadAll(str)
 	require.NoError(t, err)
 	require.Equal(t, "foobar", string(data))
 	require.Equal(t, <-addrChan, conn.LocalMultiaddr())
+	require.NoError(t, conn.Close())
+	require.True(t, conn.IsClosed())
 }
 
 func TestHashVerification(t *testing.T) {
