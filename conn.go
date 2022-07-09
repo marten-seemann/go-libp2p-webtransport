@@ -15,7 +15,7 @@ import (
 
 type conn struct {
 	transport tpt.Transport
-	wsess     *webtransport.Session
+	session   *webtransport.Session
 
 	localPeer, remotePeer peer.ID
 	local, remote         ma.Multiaddr
@@ -24,7 +24,7 @@ type conn struct {
 	scope                 network.ConnScope
 }
 
-func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, remotePubKey ic.PubKey, scope network.ConnScope) (*conn, error) {
+func newConn(tr tpt.Transport, sess *webtransport.Session, privKey ic.PrivKey, remotePubKey ic.PubKey, scope network.ConnScope) (*conn, error) {
 	localPeer, err := peer.IDFromPrivateKey(privKey)
 	if err != nil {
 		return nil, err
@@ -33,17 +33,17 @@ func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, 
 	if err != nil {
 		return nil, err
 	}
-	local, err := toWebtransportMultiaddr(wsess.LocalAddr())
+	local, err := toWebtransportMultiaddr(sess.LocalAddr())
 	if err != nil {
 		return nil, fmt.Errorf("error determiniting local addr: %w", err)
 	}
-	remote, err := toWebtransportMultiaddr(wsess.RemoteAddr())
+	remote, err := toWebtransportMultiaddr(sess.RemoteAddr())
 	if err != nil {
 		return nil, fmt.Errorf("error determiniting remote addr: %w", err)
 	}
 	return &conn{
 		transport:    tr,
-		wsess:        wsess,
+		session:      sess,
 		privKey:      privKey,
 		localPeer:    localPeer,
 		remotePeer:   remotePeer,
@@ -56,24 +56,18 @@ func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, 
 
 var _ tpt.CapableConn = &conn{}
 
-func (c *conn) Close() error {
-	return c.wsess.Close()
-}
-
-func (c *conn) IsClosed() bool {
-	panic("implement me")
-}
-
 func (c *conn) OpenStream(ctx context.Context) (network.MuxedStream, error) {
-	str, err := c.wsess.OpenStreamSync(ctx)
+	str, err := c.session.OpenStreamSync(ctx)
 	return &stream{str}, err
 }
 
 func (c *conn) AcceptStream() (network.MuxedStream, error) {
-	str, err := c.wsess.AcceptStream(context.Background())
+	str, err := c.session.AcceptStream(context.Background())
 	return &stream{str}, err
 }
 
+func (c *conn) Close() error                  { return c.session.Close() }
+func (c *conn) IsClosed() bool                { return c.session.Context().Err() != nil }
 func (c *conn) LocalPeer() peer.ID            { return c.localPeer }
 func (c *conn) LocalPrivateKey() ic.PrivKey   { return c.privKey }
 func (c *conn) RemotePeer() peer.ID           { return c.remotePeer }
