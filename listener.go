@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -140,15 +141,8 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := newConn(l.transport, sess, sconn.LocalPrivateKey(), sconn.RemotePublicKey(), connScope)
-	if err != nil {
-		sess.Close()
-		connScope.Done()
-		return
-	}
-
 	// TODO: think about what happens when this channel fills up
-	l.queue <- c
+	l.queue <- newConn(l.transport, sess, sconn, connScope)
 }
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
@@ -160,12 +154,30 @@ func (l *listener) Accept() (tpt.CapableConn, error) {
 	}
 }
 
-func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (network.ConnSecurity, error) {
+func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (connSecurityMultiaddrs, error) {
+	local, err := toWebtransportMultiaddr(sess.LocalAddr())
+	if err != nil {
+		return nil, fmt.Errorf("error determiniting local addr: %w", err)
+	}
+	remote, err := toWebtransportMultiaddr(sess.RemoteAddr())
+	if err != nil {
+		return nil, fmt.Errorf("error determiniting remote addr: %w", err)
+	}
+
 	str, err := sess.AcceptStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wsess: sess}, "")
+	c, err := l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wsess: sess}, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return &connSecurityMultiaddrsImpl{
+		ConnSecurity: c,
+		local:        local,
+		remote:       remote,
+	}, nil
 }
 
 func (l *listener) Addr() net.Addr {
