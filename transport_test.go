@@ -42,7 +42,7 @@ func randomMultihash(t *testing.T) string {
 	return s
 }
 
-func extractCertHashes(t *testing.T, addr ma.Multiaddr) []string {
+func extractCertHashes(addr ma.Multiaddr) []string {
 	var certHashesStr []string
 	ma.ForEach(addr, func(c ma.Component) bool {
 		if c.Protocol().Code == ma.P_CERTHASH {
@@ -208,9 +208,9 @@ func TestListenerAddrs(t *testing.T) {
 	require.NoError(t, err)
 	ln2, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)
-	hashes1 := extractCertHashes(t, ln1.Multiaddr())
+	hashes1 := extractCertHashes(ln1.Multiaddr())
 	require.Len(t, hashes1, 1)
-	hashes2 := extractCertHashes(t, ln2.Multiaddr())
+	hashes2 := extractCertHashes(ln2.Multiaddr())
 	require.Equal(t, hashes1, hashes2)
 }
 

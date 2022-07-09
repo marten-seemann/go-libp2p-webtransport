@@ -22,7 +22,6 @@ import (
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -99,24 +98,9 @@ func (t *transport) dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		return nil, err
 	}
 	url := fmt.Sprintf("https://%s%s", addr, webtransportHTTPEndpoint)
-	certHashesStr := make([]string, 0, 2)
-	ma.ForEach(raddr, func(c ma.Component) bool {
-		if c.Protocol().Code == ma.P_CERTHASH {
-			certHashesStr = append(certHashesStr, c.Value())
-		}
-		return true
-	})
-	var certHashes []multihash.DecodedMultihash
-	for _, s := range certHashesStr {
-		_, ch, err := multibase.Decode(s)
-		if err != nil {
-			return nil, fmt.Errorf("failed to multibase-decode certificate hash: %w", err)
-		}
-		dh, err := multihash.Decode(ch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to multihash-decode certificate hash: %w", err)
-		}
-		certHashes = append(certHashes, *dh)
+	certHashes, err := extractCertHashes(raddr)
+	if err != nil {
+		return nil, err
 	}
 	rsp, wconn, err := t.dialer.Dial(ctx, url, nil)
 	if err != nil {

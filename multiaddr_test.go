@@ -1,9 +1,13 @@
 package libp2pwebtransport
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
+	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multihash"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,4 +42,47 @@ func TestWebtransportMultiaddrFromString(t *testing.T) {
 			require.Error(t, err)
 		}
 	})
+}
+
+func encodeCertHash(t *testing.T, b []byte, mh uint64, mb multibase.Encoding) string {
+	t.Helper()
+	h, err := multihash.Encode(b, mh)
+	require.NoError(t, err)
+	str, err := multibase.Encode(mb, h)
+	require.NoError(t, err)
+	return str
+}
+
+func TestExtractCertHashes(t *testing.T) {
+	fooHash := encodeCertHash(t, []byte("foo"), multihash.SHA2_256, multibase.Base58BTC)
+	barHash := encodeCertHash(t, []byte("bar"), multihash.BLAKE2B_MAX, multibase.Base32)
+
+	// valid cases
+	for _, tc := range [...]struct {
+		addr   string
+		hashes []string
+	}{
+		{addr: "/ip4/127.0.0.1/udp/1234/quic/webtransport"},
+		{addr: fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s", fooHash), hashes: []string{"foo"}},
+		{addr: fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s/certhash/%s", fooHash, barHash), hashes: []string{"foo", "bar"}},
+	} {
+		ch, err := extractCertHashes(ma.StringCast(tc.addr))
+		require.NoError(t, err)
+		require.Len(t, ch, len(tc.hashes))
+		for i, h := range tc.hashes {
+			require.Equal(t, h, string(ch[i].Digest))
+		}
+	}
+
+	// invalid cases
+	for _, tc := range [...]struct {
+		addr string
+		err  string
+	}{
+		{addr: fmt.Sprintf("/ip4/127.0.0.1/udp/1234/quic/webtransport/certhash/%s", fooHash[:len(fooHash)-1]), err: "failed to multihash-decode certificate hash"},
+	} {
+		_, err := extractCertHashes(ma.StringCast(tc.addr))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), tc.err)
+	}
 }
