@@ -10,6 +10,7 @@ import (
 
 	pb "github.com/marten-seemann/go-libp2p-webtransport/pb"
 
+	"github.com/libp2p/go-libp2p-core/connmgr"
 	ic "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -53,6 +54,7 @@ type transport struct {
 	dialer webtransport.Dialer
 
 	rcmgr network.ResourceManager
+	gater connmgr.ConnectionGater
 
 	listenOnce    sync.Once
 	listenOnceErr error
@@ -64,7 +66,7 @@ type transport struct {
 var _ tpt.Transport = &transport{}
 var _ io.Closer = &transport{}
 
-func New(key ic.PrivKey, rcmgr network.ResourceManager) (tpt.Transport, error) {
+func New(key ic.PrivKey, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) (tpt.Transport, error) {
 	id, err := peer.IDFromPrivateKey(key)
 	if err != nil {
 		return nil, err
@@ -73,6 +75,7 @@ func New(key ic.PrivKey, rcmgr network.ResourceManager) (tpt.Transport, error) {
 		pid:     id,
 		privKey: key,
 		rcmgr:   rcmgr,
+		gater:   gater,
 		dialer: webtransport.Dialer{
 			RoundTripper: &http3.RoundTripper{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
@@ -118,6 +121,11 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		sess.Close()
 		scope.Done()
 		return nil, err
+	}
+	if t.gater != nil && !t.gater.InterceptSecured(network.DirOutbound, p, sconn) {
+		// TODO: can we close with a specific error here?
+		sess.Close()
+		return nil, fmt.Errorf("secured connection gated")
 	}
 
 	return newConn(t, sess, sconn, scope), nil
