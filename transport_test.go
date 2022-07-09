@@ -56,7 +56,7 @@ func extractCertHashes(addr ma.Multiaddr) []string {
 
 func TestTransport(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
-	tr, err := libp2pwebtransport.New(serverKey, network.NullResourceManager)
+	tr, err := libp2pwebtransport.New(serverKey, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
@@ -66,7 +66,7 @@ func TestTransport(t *testing.T) {
 	addrChan := make(chan ma.Multiaddr)
 	go func() {
 		_, clientKey := newIdentity(t)
-		tr2, err := libp2pwebtransport.New(clientKey, network.NullResourceManager)
+		tr2, err := libp2pwebtransport.New(clientKey, nil, network.NullResourceManager)
 		require.NoError(t, err)
 		defer tr2.(io.Closer).Close()
 
@@ -102,7 +102,7 @@ func TestTransport(t *testing.T) {
 
 func TestHashVerification(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
-	tr, err := libp2pwebtransport.New(serverKey, network.NullResourceManager)
+	tr, err := libp2pwebtransport.New(serverKey, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
@@ -115,7 +115,7 @@ func TestHashVerification(t *testing.T) {
 	}()
 
 	_, clientKey := newIdentity(t)
-	tr2, err := libp2pwebtransport.New(clientKey, network.NullResourceManager)
+	tr2, err := libp2pwebtransport.New(clientKey, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr2.(io.Closer).Close()
 
@@ -161,7 +161,7 @@ func TestCanDial(t *testing.T) {
 	}
 
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
+	tr, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -187,7 +187,7 @@ func TestListenAddrValidity(t *testing.T) {
 	}
 
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
+	tr, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -204,7 +204,7 @@ func TestListenAddrValidity(t *testing.T) {
 
 func TestListenerAddrs(t *testing.T) {
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
+	tr, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -227,7 +227,7 @@ func TestResourceManagerDialing(t *testing.T) {
 	p := peer.ID("foobar")
 
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key, rcmgr)
+	tr, err := libp2pwebtransport.New(key, nil, rcmgr)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -242,7 +242,7 @@ func TestResourceManagerDialing(t *testing.T) {
 
 func TestResourceManagerListening(t *testing.T) {
 	clientID, key := newIdentity(t)
-	cl, err := libp2pwebtransport.New(key, network.NullResourceManager)
+	cl, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
 	require.NoError(t, err)
 	defer cl.(io.Closer).Close()
 
@@ -251,7 +251,7 @@ func TestResourceManagerListening(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 		rcmgr := mocknetwork.NewMockResourceManager(ctrl)
-		tr, err := libp2pwebtransport.New(key, rcmgr)
+		tr, err := libp2pwebtransport.New(key, nil, rcmgr)
 		require.NoError(t, err)
 		ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 		require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestResourceManagerListening(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 		rcmgr := mocknetwork.NewMockResourceManager(ctrl)
-		tr, err := libp2pwebtransport.New(key, rcmgr)
+		tr, err := libp2pwebtransport.New(key, nil, rcmgr)
 		require.NoError(t, err)
 		ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 		require.NoError(t, err)
@@ -304,4 +304,39 @@ func TestResourceManagerListening(t *testing.T) {
 			t.Fatal("timeout")
 		}
 	})
+}
+
+// TODO: unify somehow. We do the same in libp2pquic.
+//go:generate sh -c "mockgen -package libp2pwebtransport_test -destination mock_connection_gater_test.go github.com/libp2p/go-libp2p-core/connmgr ConnectionGater && goimports -w mock_connection_gater_test.go"
+
+func TestConnectionGaterDialing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	connGater := NewMockConnectionGater(ctrl)
+
+	serverID, serverKey := newIdentity(t)
+	tr, err := libp2pwebtransport.New(serverKey, nil, network.NullResourceManager)
+	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	connGater.EXPECT().InterceptSecured(network.DirOutbound, serverID, gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
+		expected := ln.Multiaddr()
+		for {
+			_, err := expected.ValueForProtocol(ma.P_CERTHASH)
+			if err != nil {
+				break
+			}
+			expected, _ = ma.SplitLast(expected)
+		}
+		require.Equal(t, expected, addrs.RemoteMultiaddr())
+	})
+	_, key := newIdentity(t)
+	cl, err := libp2pwebtransport.New(key, connGater, network.NullResourceManager)
+	require.NoError(t, err)
+	defer cl.(io.Closer).Close()
+	_, err = cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+	require.EqualError(t, err, "secured connection gated")
 }
