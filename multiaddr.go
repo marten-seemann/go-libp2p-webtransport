@@ -3,6 +3,7 @@ package libp2pwebtransport
 import (
 	"errors"
 	"net"
+	"strconv"
 
 	ma "github.com/multiformats/go-multiaddr"
 	mafmt "github.com/multiformats/go-multiaddr-fmt"
@@ -22,4 +23,20 @@ func toWebtransportMultiaddr(na net.Addr) (ma.Multiaddr, error) {
 		return nil, errors.New("not a UDP address")
 	}
 	return addr.Encapsulate(webtransportMA), nil
+}
+
+func stringToWebtransportMultiaddr(str string) (ma.Multiaddr, error) {
+	host, portStr, err := net.SplitHostPort(str)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.ParseInt(portStr, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, errors.New("failed to parse IP")
+	}
+	return toWebtransportMultiaddr(&net.UDPAddr{IP: ip, Port: int(port)})
 }
