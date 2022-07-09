@@ -235,3 +235,59 @@ func TestResourceManagerDialing(t *testing.T) {
 	_, err = tr.Dial(context.Background(), addr, p)
 	require.EqualError(t, err, "denied")
 }
+
+func TestResourceManagerListening(t *testing.T) {
+	clientID, key := newIdentity(t)
+	cl, err := libp2pwebtransport.New(key, network.NullResourceManager)
+	require.NoError(t, err)
+	defer cl.(io.Closer).Close()
+
+	t.Run("blocking the connection", func(t *testing.T) {
+		serverID, key := newIdentity(t)
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		rcmgr := mocknetwork.NewMockResourceManager(ctrl)
+		tr, err := libp2pwebtransport.New(key, rcmgr)
+		require.NoError(t, err)
+		ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+		require.NoError(t, err)
+		defer ln.Close()
+
+		rcmgr.EXPECT().OpenConnection(network.DirInbound, false, gomock.Any()).DoAndReturn(func(_ network.Direction, _ bool, addr ma.Multiaddr) (network.ConnManagementScope, error) {
+			_, err := addr.ValueForProtocol(ma.P_WEBTRANSPORT)
+			require.NoError(t, err, "expected a WebTransport multiaddr")
+			_, addrStr, err := manet.DialArgs(addr)
+			require.NoError(t, err)
+			host, _, err := net.SplitHostPort(addrStr)
+			require.NoError(t, err)
+			require.Equal(t, "127.0.0.1", host)
+			return nil, errors.New("denied")
+		})
+
+		_, err = cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+		require.EqualError(t, err, "received status 503")
+	})
+
+	t.Run("blocking the peer", func(t *testing.T) {
+		serverID, key := newIdentity(t)
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		rcmgr := mocknetwork.NewMockResourceManager(ctrl)
+		tr, err := libp2pwebtransport.New(key, rcmgr)
+		require.NoError(t, err)
+		ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+		require.NoError(t, err)
+		defer ln.Close()
+
+		scope := mocknetwork.NewMockConnManagementScope(ctrl)
+		rcmgr.EXPECT().OpenConnection(network.DirInbound, false, gomock.Any()).Return(scope, nil)
+		scope.EXPECT().SetPeer(clientID).Return(errors.New("denied"))
+		scope.EXPECT().Done()
+
+		// The handshake will complete, but the server will immediately close the connection.
+		conn, err := cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+		require.NoError(t, err)
+		_, err = conn.AcceptStream()
+		require.Error(t, err)
+	})
+}

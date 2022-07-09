@@ -193,7 +193,7 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 	if t.listenOnceErr != nil {
 		return nil, t.listenOnceErr
 	}
-	return newListener(laddr, t, t.noise, t.certManager)
+	return newListener(laddr, t, t.noise, t.certManager, t.rcmgr)
 }
 
 func (t *transport) Protocols() []int {

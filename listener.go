@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/network"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
 
 	noise "github.com/libp2p/go-libp2p-noise"
@@ -27,6 +28,7 @@ type listener struct {
 	transport   tpt.Transport
 	noise       *noise.Transport
 	certManager *certManager
+	rcmgr       network.ResourceManager
 
 	server webtransport.Server
 
@@ -43,7 +45,7 @@ type listener struct {
 
 var _ tpt.Listener = &listener{}
 
-func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager) (tpt.Listener, error) {
+func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager, rcmgr network.ResourceManager) (tpt.Listener, error) {
 	network, addr, err := manet.DialArgs(laddr)
 	if err != nil {
 		return nil, err
@@ -64,6 +66,7 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		transport:    transport,
 		noise:        noise,
 		certManager:  certManager,
+		rcmgr:        rcmgr,
 		queue:        make(chan tpt.CapableConn, queueLen),
 		serverClosed: make(chan struct{}),
 		addr:         udpConn.LocalAddr(),
@@ -95,10 +98,28 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 }
 
 func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
+	remoteMultiaddr, err := stringToWebtransportMultiaddr(r.RemoteAddr)
+	if err != nil {
+		// This should never happen.
+		log.Errorw("converting remote address failed", "remote", r.RemoteAddr, "error", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	connScope, err := l.rcmgr.OpenConnection(network.DirInbound, false, remoteMultiaddr)
+	if err != nil {
+		log.Debugw("resource manager blocked incoming connection", "addr", r.RemoteAddr, "error", err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
 	// TODO: check ?type=multistream URL param
 	c, err := l.server.Upgrade(w, r)
 	if err != nil {
+		log.Debugw("upgrade failed", "error", err)
+		// TODO: think about the status code to use here
 		w.WriteHeader(500)
+		connScope.Done()
 		return
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
@@ -107,9 +128,18 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		log.Debugw("handshake failed", "error", err)
 		c.Close()
+		connScope.Done()
 		return
 	}
 	cancel()
+
+	if err := connScope.SetPeer(conn.RemotePeer()); err != nil {
+		log.Debugw("resource manager blocked incoming connection for peer", "peer", conn.RemotePeer(), "addr", r.RemoteAddr, "error", err)
+		conn.Close()
+		connScope.Done()
+		return
+	}
+
 	// TODO: think about what happens when this channel fills up
 	l.queue <- conn
 }
