@@ -114,7 +114,7 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: check ?type=multistream URL param
-	c, err := l.server.Upgrade(w, r)
+	sess, err := l.server.Upgrade(w, r)
 	if err != nil {
 		log.Debugw("upgrade failed", "error", err)
 		// TODO: think about the status code to use here
@@ -123,25 +123,32 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, handshakeTimeout)
-	conn, err := l.handshake(ctx, c)
+	sconn, err := l.handshake(ctx, sess)
 	if err != nil {
 		cancel()
 		log.Debugw("handshake failed", "error", err)
-		c.Close()
+		sess.Close()
 		connScope.Done()
 		return
 	}
 	cancel()
 
-	if err := connScope.SetPeer(conn.RemotePeer()); err != nil {
-		log.Debugw("resource manager blocked incoming connection for peer", "peer", conn.RemotePeer(), "addr", r.RemoteAddr, "error", err)
-		conn.Close()
+	if err := connScope.SetPeer(sconn.RemotePeer()); err != nil {
+		log.Debugw("resource manager blocked incoming connection for peer", "peer", sconn.RemotePeer(), "addr", r.RemoteAddr, "error", err)
+		sess.Close()
+		connScope.Done()
+		return
+	}
+
+	c, err := newConn(l.transport, sess, sconn.LocalPrivateKey(), sconn.RemotePublicKey(), connScope)
+	if err != nil {
+		sess.Close()
 		connScope.Done()
 		return
 	}
 
 	// TODO: think about what happens when this channel fills up
-	l.queue <- conn
+	l.queue <- c
 }
 
 func (l *listener) Accept() (tpt.CapableConn, error) {
@@ -153,16 +160,12 @@ func (l *listener) Accept() (tpt.CapableConn, error) {
 	}
 }
 
-func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (tpt.CapableConn, error) {
+func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (network.ConnSecurity, error) {
 	str, err := sess.AcceptStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wsess: sess}, "")
-	if err != nil {
-		return nil, err
-	}
-	return newConn(l.transport, sess, conn.LocalPrivateKey(), conn.RemotePublicKey())
+	return l.noise.SecureInbound(ctx, &webtransportStream{Stream: str, wsess: sess}, "")
 }
 
 func (l *listener) Addr() net.Addr {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
 
@@ -287,7 +288,17 @@ func TestResourceManagerListening(t *testing.T) {
 		// The handshake will complete, but the server will immediately close the connection.
 		conn, err := cl.Dial(context.Background(), ln.Multiaddr(), serverID)
 		require.NoError(t, err)
-		_, err = conn.AcceptStream()
-		require.Error(t, err)
+		defer conn.Close()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, err = conn.AcceptStream()
+			require.Error(t, err)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
 	})
 }

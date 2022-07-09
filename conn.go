@@ -21,9 +21,10 @@ type conn struct {
 	local, remote         ma.Multiaddr
 	privKey               ic.PrivKey
 	remotePubKey          ic.PubKey
+	scope                 network.ConnScope
 }
 
-func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, remotePubKey ic.PubKey) (*conn, error) {
+func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, remotePubKey ic.PubKey, scope network.ConnScope) (*conn, error) {
 	localPeer, err := peer.IDFromPrivateKey(privKey)
 	if err != nil {
 		return nil, err
@@ -49,6 +50,7 @@ func newConn(tr tpt.Transport, wsess *webtransport.Session, privKey ic.PrivKey, 
 		remotePubKey: remotePubKey,
 		local:        local,
 		remote:       remote,
+		scope:        scope,
 	}, nil
 }
 
@@ -78,12 +80,5 @@ func (c *conn) RemotePeer() peer.ID           { return c.remotePeer }
 func (c *conn) RemotePublicKey() ic.PubKey    { return c.remotePubKey }
 func (c *conn) LocalMultiaddr() ma.Multiaddr  { return c.local }
 func (c *conn) RemoteMultiaddr() ma.Multiaddr { return c.remote }
-
-func (c *conn) Scope() network.ConnScope {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (c *conn) Transport() tpt.Transport {
-	return c.transport
-}
+func (c *conn) Scope() network.ConnScope      { return c.scope }
+func (c *conn) Transport() tpt.Transport      { return c.transport }
