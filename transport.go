@@ -39,13 +39,17 @@ type connSecurityMultiaddrs interface {
 
 type connSecurityMultiaddrsImpl struct {
 	network.ConnSecurity
+	network.ConnMultiaddrs
+}
+
+type connMultiaddrs struct {
 	local, remote ma.Multiaddr
 }
 
-var _ connSecurityMultiaddrs = &connSecurityMultiaddrsImpl{}
+var _ network.ConnMultiaddrs = &connMultiaddrs{}
 
-func (c *connSecurityMultiaddrsImpl) LocalMultiaddr() ma.Multiaddr  { return c.local }
-func (c *connSecurityMultiaddrsImpl) RemoteMultiaddr() ma.Multiaddr { return c.remote }
+func (c *connMultiaddrs) LocalMultiaddr() ma.Multiaddr  { return c.local }
+func (c *connMultiaddrs) RemoteMultiaddr() ma.Multiaddr { return c.remote }
 
 type transport struct {
 	privKey ic.PrivKey
@@ -176,9 +180,8 @@ func (t *transport) upgrade(ctx context.Context, sess *webtransport.Session, p p
 		return nil, err
 	}
 	return &connSecurityMultiaddrsImpl{
-		ConnSecurity: c,
-		local:        local,
-		remote:       remote,
+		ConnSecurity:   c,
+		ConnMultiaddrs: &connMultiaddrs{local: local, remote: remote},
 	}, nil
 }
 
@@ -225,7 +228,7 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 	if t.listenOnceErr != nil {
 		return nil, t.listenOnceErr
 	}
-	return newListener(laddr, t, t.noise, t.certManager, t.rcmgr)
+	return newListener(laddr, t, t.noise, t.certManager, t.gater, t.rcmgr)
 }
 
 func (t *transport) Protocols() []int {
