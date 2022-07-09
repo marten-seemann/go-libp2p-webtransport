@@ -11,6 +11,7 @@ import (
 	pb "github.com/marten-seemann/go-libp2p-webtransport/pb"
 
 	ic "github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
 
@@ -37,6 +38,8 @@ type transport struct {
 
 	dialer webtransport.Dialer
 
+	rcmgr network.ResourceManager
+
 	listenOnce    sync.Once
 	listenOnceErr error
 	certManager   *certManager
@@ -47,7 +50,7 @@ type transport struct {
 var _ tpt.Transport = &transport{}
 var _ io.Closer = &transport{}
 
-func New(key ic.PrivKey) (tpt.Transport, error) {
+func New(key ic.PrivKey, rcmgr network.ResourceManager) (tpt.Transport, error) {
 	id, err := peer.IDFromPrivateKey(key)
 	if err != nil {
 		return nil, err
@@ -55,6 +58,7 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 	t := &transport{
 		pid:     id,
 		privKey: key,
+		rcmgr:   rcmgr,
 		dialer: webtransport.Dialer{
 			RoundTripper: &http3.RoundTripper{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
@@ -70,6 +74,26 @@ func New(key ic.PrivKey) (tpt.Transport, error) {
 }
 
 func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tpt.CapableConn, error) {
+	scope, err := t.rcmgr.OpenConnection(network.DirOutbound, false, raddr)
+	if err != nil {
+		log.Debugw("resource manager blocked outgoing connection", "peer", p, "addr", raddr, "error", err)
+		return nil, err
+	}
+	if err := scope.SetPeer(p); err != nil {
+		log.Debugw("resource manager blocked outgoing connection for peer", "peer", p, "addr", raddr, "error", err)
+		scope.Done()
+		return nil, err
+	}
+
+	conn, err := t.dial(ctx, raddr, p)
+	if err != nil {
+		scope.Done()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func (t *transport) dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tpt.CapableConn, error) {
 	_, addr, err := manet.DialArgs(raddr)
 	if err != nil {
 		return nil, err

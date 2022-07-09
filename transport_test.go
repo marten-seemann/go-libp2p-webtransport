@@ -4,16 +4,20 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
-	"strings"
+	"net"
 	"testing"
 
 	libp2pwebtransport "github.com/marten-seemann/go-libp2p-webtransport"
 
 	ic "github.com/libp2p/go-libp2p-core/crypto"
+	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
 
+	"github.com/golang/mock/gomock"
+	mocknetwork "github.com/libp2p/go-libp2p-testing/mocks/network"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
@@ -51,7 +55,7 @@ func extractCertHashes(t *testing.T, addr ma.Multiaddr) []string {
 
 func TestTransport(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
-	tr, err := libp2pwebtransport.New(serverKey)
+	tr, err := libp2pwebtransport.New(serverKey, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
@@ -61,7 +65,7 @@ func TestTransport(t *testing.T) {
 	addrChan := make(chan ma.Multiaddr)
 	go func() {
 		_, clientKey := newIdentity(t)
-		tr2, err := libp2pwebtransport.New(clientKey)
+		tr2, err := libp2pwebtransport.New(clientKey, network.NullResourceManager)
 		require.NoError(t, err)
 		defer tr2.(io.Closer).Close()
 
@@ -76,7 +80,8 @@ func TestTransport(t *testing.T) {
 		// check RemoteMultiaddr
 		_, addr, err := manet.DialArgs(ln.Multiaddr())
 		require.NoError(t, err)
-		port := strings.Split(addr, ":")[1]
+		_, port, err := net.SplitHostPort(addr)
+		require.NoError(t, err)
 		require.Equal(t, ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/udp/%s/quic/webtransport", port)), conn.RemoteMultiaddr())
 		addrChan <- conn.RemoteMultiaddr()
 	}()
@@ -93,7 +98,7 @@ func TestTransport(t *testing.T) {
 
 func TestHashVerification(t *testing.T) {
 	serverID, serverKey := newIdentity(t)
-	tr, err := libp2pwebtransport.New(serverKey)
+	tr, err := libp2pwebtransport.New(serverKey, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
@@ -106,7 +111,7 @@ func TestHashVerification(t *testing.T) {
 	}()
 
 	_, clientKey := newIdentity(t)
-	tr2, err := libp2pwebtransport.New(clientKey)
+	tr2, err := libp2pwebtransport.New(clientKey, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr2.(io.Closer).Close()
 
@@ -152,7 +157,7 @@ func TestCanDial(t *testing.T) {
 	}
 
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key)
+	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -178,7 +183,7 @@ func TestListenAddrValidity(t *testing.T) {
 	}
 
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key)
+	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -195,7 +200,7 @@ func TestListenAddrValidity(t *testing.T) {
 
 func TestListenerAddrs(t *testing.T) {
 	_, key := newIdentity(t)
-	tr, err := libp2pwebtransport.New(key)
+	tr, err := libp2pwebtransport.New(key, network.NullResourceManager)
 	require.NoError(t, err)
 	defer tr.(io.Closer).Close()
 
@@ -207,4 +212,26 @@ func TestListenerAddrs(t *testing.T) {
 	require.Len(t, hashes1, 1)
 	hashes2 := extractCertHashes(t, ln2.Multiaddr())
 	require.Equal(t, hashes1, hashes2)
+}
+
+func TestResourceManagerDialing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	rcmgr := mocknetwork.NewMockResourceManager(ctrl)
+
+	addr := ma.StringCast("/ip4/9.8.7.6/udp/1234/quic/webtransport")
+	p := peer.ID("foobar")
+
+	_, key := newIdentity(t)
+	tr, err := libp2pwebtransport.New(key, rcmgr)
+	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+
+	scope := mocknetwork.NewMockConnManagementScope(ctrl)
+	rcmgr.EXPECT().OpenConnection(network.DirOutbound, false, addr).Return(scope, nil)
+	scope.EXPECT().SetPeer(p).Return(errors.New("denied"))
+	scope.EXPECT().Done()
+
+	_, err = tr.Dial(context.Background(), addr, p)
+	require.EqualError(t, err, "denied")
 }
