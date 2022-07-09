@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/libp2p/go-libp2p-core/connmgr"
 	"github.com/libp2p/go-libp2p-core/network"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
 
@@ -30,6 +31,7 @@ type listener struct {
 	noise       *noise.Transport
 	certManager *certManager
 	rcmgr       network.ResourceManager
+	gater       connmgr.ConnectionGater
 
 	server webtransport.Server
 
@@ -46,7 +48,7 @@ type listener struct {
 
 var _ tpt.Listener = &listener{}
 
-func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager, rcmgr network.ResourceManager) (tpt.Listener, error) {
+func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) (tpt.Listener, error) {
 	network, addr, err := manet.DialArgs(laddr)
 	if err != nil {
 		return nil, err
@@ -68,6 +70,7 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 		noise:        noise,
 		certManager:  certManager,
 		rcmgr:        rcmgr,
+		gater:        gater,
 		queue:        make(chan tpt.CapableConn, queueLen),
 		serverClosed: make(chan struct{}),
 		addr:         udpConn.LocalAddr(),
@@ -104,6 +107,10 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 		// This should never happen.
 		log.Errorw("converting remote address failed", "remote", r.RemoteAddr, "error", err)
 		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if l.gater != nil && !l.gater.InterceptAccept(&connMultiaddrs{local: l.multiaddr, remote: remoteMultiaddr}) {
+		w.WriteHeader(http.StatusForbidden)
 		return
 	}
 
@@ -174,9 +181,8 @@ func (l *listener) handshake(ctx context.Context, sess *webtransport.Session) (c
 	}
 
 	return &connSecurityMultiaddrsImpl{
-		ConnSecurity: c,
-		local:        local,
-		remote:       remote,
+		ConnSecurity:   c,
+		ConnMultiaddrs: &connMultiaddrs{local: local, remote: remote},
 	}, nil
 }
 
