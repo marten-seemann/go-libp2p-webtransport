@@ -368,3 +368,43 @@ func TestConnectionGaterInterceptAccept(t *testing.T) {
 	_, err = cl.Dial(context.Background(), ln.Multiaddr(), serverID)
 	require.EqualError(t, err, "received status 403")
 }
+
+func TestConnectionGaterInterceptSecured(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	connGater := NewMockConnectionGater(ctrl)
+
+	serverID, serverKey := newIdentity(t)
+	tr, err := libp2pwebtransport.New(serverKey, connGater, network.NullResourceManager)
+	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	clientID, key := newIdentity(t)
+	cl, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
+	require.NoError(t, err)
+	defer cl.(io.Closer).Close()
+
+	connGater.EXPECT().InterceptAccept(gomock.Any()).Return(true)
+	connGater.EXPECT().InterceptSecured(network.DirInbound, clientID, gomock.Any()).Do(func(_ network.Direction, _ peer.ID, addrs network.ConnMultiaddrs) {
+		require.Equal(t, stripCertHashes(ln.Multiaddr()), addrs.LocalMultiaddr())
+		require.NotEqual(t, stripCertHashes(ln.Multiaddr()), addrs.RemoteMultiaddr())
+	})
+	// The handshake will complete, but the server will immediately close the connection.
+	conn, err := cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+	require.NoError(t, err)
+	defer conn.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err = conn.AcceptStream()
+		require.Error(t, err)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+}

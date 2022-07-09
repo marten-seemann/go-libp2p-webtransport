@@ -141,6 +141,13 @@ func (l *listener) httpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	cancel()
 
+	if l.gater != nil && !l.gater.InterceptSecured(network.DirInbound, sconn.RemotePeer(), sconn) {
+		// TODO: can we close with a specific error here?
+		sess.Close()
+		connScope.Done()
+		return
+	}
+
 	if err := connScope.SetPeer(sconn.RemotePeer()); err != nil {
 		log.Debugw("resource manager blocked incoming connection for peer", "peer", sconn.RemotePeer(), "addr", r.RemoteAddr, "error", err)
 		sess.Close()
