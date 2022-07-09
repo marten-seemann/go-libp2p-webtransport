@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"io"
 	"sync"
 	"time"
@@ -21,7 +22,6 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
 	ma "github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 )
 
@@ -73,6 +73,15 @@ func New(key ic.PrivKey, rcmgr network.ResourceManager) (tpt.Transport, error) {
 }
 
 func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tpt.CapableConn, error) {
+	_, addr, err := manet.DialArgs(raddr)
+	if err != nil {
+		return nil, err
+	}
+	certHashes, err := extractCertHashes(raddr)
+	if err != nil {
+		return nil, err
+	}
+
 	scope, err := t.rcmgr.OpenConnection(network.DirOutbound, false, raddr)
 	if err != nil {
 		log.Debugw("resource manager blocked outgoing connection", "peer", p, "addr", raddr, "error", err)
@@ -84,32 +93,40 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		return nil, err
 	}
 
-	conn, err := t.dial(ctx, raddr, p)
+	sess, err := t.dial(ctx, addr)
 	if err != nil {
 		scope.Done()
 		return nil, err
 	}
-	return conn, nil
+	sconn, err := t.upgrade(ctx, sess, p, certHashes)
+	if err != nil {
+		sess.Close()
+		scope.Done()
+		return nil, err
+	}
+	c, err := newConn(t, sess, t.privKey, sconn.RemotePublicKey(), scope)
+	if err != nil {
+		sess.Close()
+		scope.Done()
+		return nil, err
+	}
+	return c, nil
 }
 
-func (t *transport) dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tpt.CapableConn, error) {
-	_, addr, err := manet.DialArgs(raddr)
-	if err != nil {
-		return nil, err
-	}
+func (t *transport) dial(ctx context.Context, addr string) (*webtransport.Session, error) {
 	url := fmt.Sprintf("https://%s%s", addr, webtransportHTTPEndpoint)
-	certHashes, err := extractCertHashes(raddr)
-	if err != nil {
-		return nil, err
-	}
-	rsp, wconn, err := t.dialer.Dial(ctx, url, nil)
+	rsp, sess, err := t.dialer.Dial(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	if rsp.StatusCode < 200 || rsp.StatusCode > 299 {
 		return nil, fmt.Errorf("invalid response status code: %d", rsp.StatusCode)
 	}
-	str, err := wconn.OpenStreamSync(ctx)
+	return sess, err
+}
+
+func (t *transport) upgrade(ctx context.Context, sess *webtransport.Session, p peer.ID, certHashes []multihash.DecodedMultihash) (network.ConnSecurity, error) {
+	str, err := sess.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -127,11 +144,7 @@ func (t *transport) dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal WebTransport protobuf: %w", err)
 	}
-	sconn, err := t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wsess: wconn}, p, msgBytes)
-	if err != nil {
-		return nil, err
-	}
-	return newConn(t, wconn, t.privKey, sconn.RemotePublicKey())
+	return t.noise.SecureOutboundWithEarlyData(ctx, &webtransportStream{Stream: str, wsess: sess}, p, msgBytes)
 }
 
 func (t *transport) checkEarlyData(b []byte) error {
