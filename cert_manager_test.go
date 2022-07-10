@@ -3,10 +3,11 @@ package libp2pwebtransport
 import (
 	"crypto/sha256"
 	"crypto/tls"
-	"os"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
@@ -37,15 +38,17 @@ func certHashFromComponent(t *testing.T, comp ma.Component) []byte {
 }
 
 func TestInitialCert(t *testing.T) {
-	m, err := newCertManager(certValidity)
+	cl := clock.NewMock()
+	cl.Add(1234567 * time.Hour)
+	m, err := newCertManager(cl, certValidity)
 	require.NoError(t, err)
 	defer m.Close()
 
 	conf := m.GetConfig()
 	require.Len(t, conf.Certificates, 1)
 	cert := conf.Certificates[0]
-	require.WithinDuration(t, time.Now(), cert.Leaf.NotBefore, time.Second)
-	require.WithinDuration(t, time.Now().Add(certValidity), cert.Leaf.NotAfter, time.Second)
+	require.Equal(t, cl.Now().UTC(), cert.Leaf.NotBefore)
+	require.Equal(t, cl.Now().Add(certValidity).UTC(), cert.Leaf.NotAfter)
 	addr := m.AddrComponent()
 	components := splitMultiaddr(addr)
 	require.Len(t, components, 1)
@@ -55,18 +58,17 @@ func TestInitialCert(t *testing.T) {
 }
 
 func TestCertRenewal(t *testing.T) {
-	var certValidity = 300 * time.Millisecond
-	if os.Getenv("CI") != "" {
-		certValidity = 2 * time.Second
-	}
-	m, err := newCertManager(certValidity)
+	cl := clock.NewMock()
+	m, err := newCertManager(cl, certValidity)
 	require.NoError(t, err)
 	defer m.Close()
 
 	firstConf := m.GetConfig()
 	require.Len(t, splitMultiaddr(m.AddrComponent()), 1)
 	// wait for a new certificate to be generated
-	require.Eventually(t, func() bool { return len(splitMultiaddr(m.AddrComponent())) > 1 }, certValidity/2, 10*time.Millisecond)
+	fmt.Println("add time")
+	cl.Add(certValidity / 2)
+	require.Eventually(t, func() bool { return len(splitMultiaddr(m.AddrComponent())) > 1 }, 200*time.Millisecond, 10*time.Millisecond)
 	// the actual config used should still be the same, we're just advertising the hash of the next config
 	components := splitMultiaddr(m.AddrComponent())
 	require.Len(t, components, 2)
@@ -74,7 +76,8 @@ func TestCertRenewal(t *testing.T) {
 		require.Equal(t, ma.P_CERTHASH, c.Protocol().Code)
 	}
 	require.Equal(t, firstConf, m.GetConfig())
-	require.Eventually(t, func() bool { return m.GetConfig() != firstConf }, certValidity/2, 10*time.Millisecond)
+	cl.Add(certValidity / 2)
+	require.Eventually(t, func() bool { return m.GetConfig() != firstConf }, 200*time.Millisecond, 10*time.Millisecond)
 	newConf := m.GetConfig()
 	// check that the new config now matches the second component
 	hash := certificateHashFromTLSConfig(newConf)

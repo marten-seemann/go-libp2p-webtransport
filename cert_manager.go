@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/benbjohnson/clock"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
@@ -40,6 +41,7 @@ func newCertConfig(start, end time.Time, conf *tls.Config) (*certConfig, error) 
 //    We continue to remember the hash of (1) for validation during the Noise handshake for another 4 days,
 //    as the client might be connecting with a cached address.
 type certManager struct {
+	clock     clock.Clock
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 	refCount  sync.WaitGroup
@@ -53,18 +55,22 @@ type certManager struct {
 	addrComp      ma.Multiaddr
 }
 
-func newCertManager(certValidity time.Duration) (*certManager, error) {
+func newCertManager(clock clock.Clock, certValidity time.Duration) (*certManager, error) {
 	m := &certManager{
+		clock:        clock,
 		certValidity: certValidity,
 	}
 	m.ctx, m.ctxCancel = context.WithCancel(context.Background())
 	if err := m.init(); err != nil {
 		return nil, err
 	}
+
+	t := m.clock.Ticker(m.certValidity * 4 / 9) // make sure we're a bit faster than 1/2
 	m.refCount.Add(1)
 	go func() {
 		defer m.refCount.Done()
-		if err := m.background(); err != nil {
+		defer t.Stop()
+		if err := m.background(t); err != nil {
 			log.Fatal(err)
 		}
 	}()
@@ -72,7 +78,7 @@ func newCertManager(certValidity time.Duration) (*certManager, error) {
 }
 
 func (m *certManager) init() error {
-	start := time.Now()
+	start := m.clock.Now()
 	end := start.Add(m.certValidity)
 	tlsConf, err := getTLSConf(start, end)
 	if err != nil {
@@ -86,10 +92,7 @@ func (m *certManager) init() error {
 	return m.cacheAddrComponent()
 }
 
-func (m *certManager) background() error {
-	t := time.NewTicker(m.certValidity * 4 / 9) // make sure we're a bit faster than 1/2
-	defer t.Stop()
-
+func (m *certManager) background(t *clock.Ticker) error {
 	for {
 		select {
 		case <-m.ctx.Done():
