@@ -294,23 +294,29 @@ func TestResourceManagerListening(t *testing.T) {
 		require.NoError(t, err)
 		defer ln.Close()
 
+		serverDone := make(chan struct{})
 		scope := mocknetwork.NewMockConnManagementScope(ctrl)
 		rcmgr.EXPECT().OpenConnection(network.DirInbound, false, gomock.Any()).Return(scope, nil)
 		scope.EXPECT().SetPeer(clientID).Return(errors.New("denied"))
-		scope.EXPECT().Done()
+		scope.EXPECT().Done().Do(func() { close(serverDone) })
 
 		// The handshake will complete, but the server will immediately close the connection.
 		conn, err := cl.Dial(context.Background(), ln.Multiaddr(), serverID)
 		require.NoError(t, err)
 		defer conn.Close()
-		done := make(chan struct{})
+		clientDone := make(chan struct{})
 		go func() {
-			defer close(done)
+			defer close(clientDone)
 			_, err = conn.AcceptStream()
 			require.Error(t, err)
 		}()
 		select {
-		case <-done:
+		case <-clientDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout")
+		}
+		select {
+		case <-serverDone:
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout")
 		}
