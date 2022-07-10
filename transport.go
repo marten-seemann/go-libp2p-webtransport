@@ -3,6 +3,7 @@ package libp2pwebtransport
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"sync"
@@ -55,8 +56,6 @@ type transport struct {
 	privKey ic.PrivKey
 	pid     peer.ID
 
-	dialer webtransport.Dialer
-
 	rcmgr network.ResourceManager
 	gater connmgr.ConnectionGater
 
@@ -80,11 +79,6 @@ func New(key ic.PrivKey, gater connmgr.ConnectionGater, rcmgr network.ResourceMa
 		privKey: key,
 		rcmgr:   rcmgr,
 		gater:   gater,
-		dialer: webtransport.Dialer{
-			RoundTripper: &http3.RoundTripper{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // TODO: verify certificate,
-			},
-		},
 	}
 	noise, err := noise.New(key, noise.WithEarlyDataHandler(t.checkEarlyData))
 	if err != nil {
@@ -115,7 +109,7 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 		return nil, err
 	}
 
-	sess, err := t.dial(ctx, addr)
+	sess, err := t.dial(ctx, addr, certHashes)
 	if err != nil {
 		scope.Done()
 		return nil, err
@@ -135,9 +129,19 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 	return newConn(t, sess, sconn, scope), nil
 }
 
-func (t *transport) dial(ctx context.Context, addr string) (*webtransport.Session, error) {
+func (t *transport) dial(ctx context.Context, addr string, certHashes []multihash.DecodedMultihash) (*webtransport.Session, error) {
 	url := fmt.Sprintf("https://%s%s", addr, webtransportHTTPEndpoint)
-	rsp, sess, err := t.dialer.Dial(ctx, url, nil)
+	dialer := webtransport.Dialer{
+		RoundTripper: &http3.RoundTripper{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // this is not insecure. We verify the certificate ourselves.
+				VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+					return verifyRawCerts(rawCerts, certHashes)
+				},
+			},
+		},
+	}
+	rsp, sess, err := dialer.Dial(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}

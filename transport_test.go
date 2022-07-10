@@ -145,6 +145,7 @@ func TestHashVerification(t *testing.T) {
 
 		_, err := tr2.Dial(context.Background(), addr, serverID)
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "CRYPTO_ERROR (0x12a): cert hash not found")
 	})
 
 	t.Run("fails when adding a wrong hash", func(t *testing.T) {
