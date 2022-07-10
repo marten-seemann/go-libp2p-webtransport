@@ -1,15 +1,21 @@
 package libp2pwebtransport
 
 import (
-	"github.com/multiformats/go-multibase"
-	"github.com/multiformats/go-multihash"
+	"crypto/sha256"
+	"crypto/tls"
 	"os"
 	"testing"
 	"time"
 
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-multibase"
+	"github.com/multiformats/go-multihash"
 	"github.com/stretchr/testify/require"
 )
+
+func certificateHashFromTLSConfig(c *tls.Config) [32]byte {
+	return sha256.Sum256(c.Certificates[0].Certificate[0])
+}
 
 func splitMultiaddr(addr ma.Multiaddr) []ma.Component {
 	var components []ma.Component
@@ -44,7 +50,7 @@ func TestInitialCert(t *testing.T) {
 	components := splitMultiaddr(addr)
 	require.Len(t, components, 1)
 	require.Equal(t, ma.P_CERTHASH, components[0].Protocol().Code)
-	hash := certificateHash(conf)
+	hash := certificateHashFromTLSConfig(conf)
 	require.Equal(t, hash[:], certHashFromComponent(t, components[0]))
 }
 
@@ -71,6 +77,6 @@ func TestCertRenewal(t *testing.T) {
 	require.Eventually(t, func() bool { return m.GetConfig() != firstConf }, certValidity/2, 10*time.Millisecond)
 	newConf := m.GetConfig()
 	// check that the new config now matches the second component
-	hash := certificateHash(newConf)
+	hash := certificateHashFromTLSConfig(newConf)
 	require.Equal(t, hash[:], certHashFromComponent(t, components[1]))
 }
