@@ -3,7 +3,6 @@ package libp2pwebtransport
 import (
 	"crypto/sha256"
 	"crypto/tls"
-	"fmt"
 	"testing"
 	"time"
 
@@ -40,7 +39,7 @@ func certHashFromComponent(t *testing.T, comp ma.Component) []byte {
 func TestInitialCert(t *testing.T) {
 	cl := clock.NewMock()
 	cl.Add(1234567 * time.Hour)
-	m, err := newCertManager(cl, certValidity)
+	m, err := newCertManager(cl)
 	require.NoError(t, err)
 	defer m.Close()
 
@@ -59,14 +58,13 @@ func TestInitialCert(t *testing.T) {
 
 func TestCertRenewal(t *testing.T) {
 	cl := clock.NewMock()
-	m, err := newCertManager(cl, certValidity)
+	m, err := newCertManager(cl)
 	require.NoError(t, err)
 	defer m.Close()
 
 	firstConf := m.GetConfig()
 	require.Len(t, splitMultiaddr(m.AddrComponent()), 1)
 	// wait for a new certificate to be generated
-	fmt.Println("add time")
 	cl.Add(certValidity / 2)
 	require.Eventually(t, func() bool { return len(splitMultiaddr(m.AddrComponent())) > 1 }, 200*time.Millisecond, 10*time.Millisecond)
 	// the actual config used should still be the same, we're just advertising the hash of the next config

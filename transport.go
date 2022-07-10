@@ -225,7 +225,7 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 		return nil, fmt.Errorf("cannot listen on non-WebTransport addr: %s", laddr)
 	}
 	t.listenOnce.Do(func() {
-		t.certManager, t.listenOnceErr = newCertManager(t.clock, certValidity)
+		t.certManager, t.listenOnceErr = newCertManager(t.clock)
 	})
 	if t.listenOnceErr != nil {
 		return nil, t.listenOnceErr

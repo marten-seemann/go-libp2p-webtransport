@@ -46,8 +46,6 @@ type certManager struct {
 	ctxCancel context.CancelFunc
 	refCount  sync.WaitGroup
 
-	certValidity time.Duration // so we can set it in tests
-
 	mx            sync.Mutex
 	lastConfig    *certConfig // initially nil
 	currentConfig *certConfig
@@ -55,17 +53,14 @@ type certManager struct {
 	addrComp      ma.Multiaddr
 }
 
-func newCertManager(clock clock.Clock, certValidity time.Duration) (*certManager, error) {
-	m := &certManager{
-		clock:        clock,
-		certValidity: certValidity,
-	}
+func newCertManager(clock clock.Clock) (*certManager, error) {
+	m := &certManager{clock: clock}
 	m.ctx, m.ctxCancel = context.WithCancel(context.Background())
 	if err := m.init(); err != nil {
 		return nil, err
 	}
 
-	t := m.clock.Ticker(m.certValidity * 4 / 9) // make sure we're a bit faster than 1/2
+	t := m.clock.Ticker(certValidity * 4 / 9) // make sure we're a bit faster than 1/2
 	m.refCount.Add(1)
 	go func() {
 		defer m.refCount.Done()
@@ -79,7 +74,7 @@ func newCertManager(clock clock.Clock, certValidity time.Duration) (*certManager
 
 func (m *certManager) init() error {
 	start := m.clock.Now()
-	end := start.Add(m.certValidity)
+	end := start.Add(certValidity)
 	tlsConf, err := getTLSConf(start, end)
 	if err != nil {
 		return err
@@ -98,7 +93,7 @@ func (m *certManager) background(t *clock.Ticker) error {
 		case <-m.ctx.Done():
 			return nil
 		case start := <-t.C:
-			end := start.Add(m.certValidity)
+			end := start.Add(certValidity)
 			tlsConf, err := getTLSConf(start, end)
 			if err != nil {
 				return err
