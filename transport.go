@@ -19,6 +19,7 @@ import (
 
 	noise "github.com/libp2p/go-libp2p-noise"
 
+	"github.com/benbjohnson/clock"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/marten-seemann/webtransport-go"
@@ -33,9 +34,19 @@ const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
 const certValidity = 14 * 24 * time.Hour
 
+type Option func(*transport) error
+
+func WithClock(cl clock.Clock) Option {
+	return func(t *transport) error {
+		t.clock = cl
+		return nil
+	}
+}
+
 type transport struct {
 	privKey ic.PrivKey
 	pid     peer.ID
+	clock   clock.Clock
 
 	rcmgr network.ResourceManager
 	gater connmgr.ConnectionGater
@@ -50,7 +61,7 @@ type transport struct {
 var _ tpt.Transport = &transport{}
 var _ io.Closer = &transport{}
 
-func New(key ic.PrivKey, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) (tpt.Transport, error) {
+func New(key ic.PrivKey, gater connmgr.ConnectionGater, rcmgr network.ResourceManager, opts ...Option) (tpt.Transport, error) {
 	id, err := peer.IDFromPrivateKey(key)
 	if err != nil {
 		return nil, err
@@ -60,6 +71,12 @@ func New(key ic.PrivKey, gater connmgr.ConnectionGater, rcmgr network.ResourceMa
 		privKey: key,
 		rcmgr:   rcmgr,
 		gater:   gater,
+		clock:   clock.New(),
+	}
+	for _, opt := range opts {
+		if err := opt(t); err != nil {
+			return nil, err
+		}
 	}
 	noise, err := noise.New(key, noise.WithEarlyDataHandler(t.checkEarlyData))
 	if err != nil {
@@ -208,7 +225,7 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 		return nil, fmt.Errorf("cannot listen on non-WebTransport addr: %s", laddr)
 	}
 	t.listenOnce.Do(func() {
-		t.certManager, t.listenOnceErr = newCertManager(certValidity)
+		t.certManager, t.listenOnceErr = newCertManager(t.clock, certValidity)
 	})
 	if t.listenOnceErr != nil {
 		return nil, t.listenOnceErr

@@ -3,6 +3,7 @@ module github.com/marten-seemann/go-libp2p-webtransport
 go 1.17
 
 require (
+	github.com/benbjohnson/clock v1.3.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
 	github.com/ipfs/go-log/v2 v2.5.1
