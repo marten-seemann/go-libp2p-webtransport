@@ -2,11 +2,32 @@ package libp2pwebtransport
 
 import (
 	"context"
+
 	"github.com/libp2p/go-libp2p-core/network"
 	tpt "github.com/libp2p/go-libp2p-core/transport"
 
 	"github.com/marten-seemann/webtransport-go"
+	ma "github.com/multiformats/go-multiaddr"
 )
+
+type connSecurityMultiaddrs interface {
+	network.ConnMultiaddrs
+	network.ConnSecurity
+}
+
+type connSecurityMultiaddrsImpl struct {
+	network.ConnSecurity
+	network.ConnMultiaddrs
+}
+
+type connMultiaddrs struct {
+	local, remote ma.Multiaddr
+}
+
+var _ network.ConnMultiaddrs = &connMultiaddrs{}
+
+func (c *connMultiaddrs) LocalMultiaddr() ma.Multiaddr  { return c.local }
+func (c *connMultiaddrs) RemoteMultiaddr() ma.Multiaddr { return c.remote }
 
 type conn struct {
 	connSecurityMultiaddrs

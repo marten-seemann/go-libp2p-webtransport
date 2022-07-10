@@ -33,25 +33,6 @@ const webtransportHTTPEndpoint = "/.well-known/libp2p-webtransport"
 
 const certValidity = 14 * 24 * time.Hour
 
-type connSecurityMultiaddrs interface {
-	network.ConnMultiaddrs
-	network.ConnSecurity
-}
-
-type connSecurityMultiaddrsImpl struct {
-	network.ConnSecurity
-	network.ConnMultiaddrs
-}
-
-type connMultiaddrs struct {
-	local, remote ma.Multiaddr
-}
-
-var _ network.ConnMultiaddrs = &connMultiaddrs{}
-
-func (c *connMultiaddrs) LocalMultiaddr() ma.Multiaddr  { return c.local }
-func (c *connMultiaddrs) RemoteMultiaddr() ma.Multiaddr { return c.remote }
-
 type transport struct {
 	privKey ic.PrivKey
 	pid     peer.ID
