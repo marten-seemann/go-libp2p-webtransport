@@ -16,15 +16,16 @@ import (
 )
 
 type certConfig struct {
-	start, end time.Time
-	tlsConf    *tls.Config
-	sha256     [32]byte // cached from the tlsConf
+	tlsConf *tls.Config
+	sha256  [32]byte // cached from the tlsConf
 }
 
-func newCertConfig(start, end time.Time, conf *tls.Config) (*certConfig, error) {
+func newCertConfig(start, end time.Time) (*certConfig, error) {
+	conf, err := getTLSConf(start, end)
+	if err != nil {
+		return nil, err
+	}
 	return &certConfig{
-		start:   start,
-		end:     end,
 		tlsConf: conf,
 		sha256:  sha256.Sum256(conf.Certificates[0].Leaf.Raw),
 	}, nil
@@ -75,11 +76,7 @@ func newCertManager(clock clock.Clock) (*certManager, error) {
 func (m *certManager) init() error {
 	start := m.clock.Now()
 	end := start.Add(certValidity)
-	tlsConf, err := getTLSConf(start, end)
-	if err != nil {
-		return err
-	}
-	cc, err := newCertConfig(start, end, tlsConf)
+	cc, err := newCertConfig(start, end)
 	if err != nil {
 		return err
 	}
@@ -94,11 +91,7 @@ func (m *certManager) background(t *clock.Ticker) error {
 			return nil
 		case start := <-t.C:
 			end := start.Add(certValidity)
-			tlsConf, err := getTLSConf(start, end)
-			if err != nil {
-				return err
-			}
-			cc, err := newCertConfig(start, end, tlsConf)
+			cc, err := newCertConfig(start, end)
 			if err != nil {
 				return err
 			}
