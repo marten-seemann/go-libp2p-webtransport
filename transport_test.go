@@ -140,7 +140,16 @@ func TestHashVerification(t *testing.T) {
 
 	t.Run("fails using only a wrong hash", func(t *testing.T) {
 		// replace the certificate hash in the multiaddr with a fake hash
-		addr, _ := ma.SplitLast(ln.Multiaddr())
+		addr := ln.Multiaddr()
+		// strip off all certhash components
+		for {
+			a, comp := ma.SplitLast(addr)
+			if comp.Protocol().Code != ma.P_CERTHASH {
+				break
+			}
+			addr = a
+		}
+
 		addr = addr.Encapsulate(foobarHash)
 
 		_, err := tr2.Dial(context.Background(), addr, serverID)
@@ -224,7 +233,7 @@ func TestListenerAddrs(t *testing.T) {
 	ln2, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
 	require.NoError(t, err)
 	hashes1 := extractCertHashes(ln1.Multiaddr())
-	require.Len(t, hashes1, 1)
+	require.Len(t, hashes1, 2)
 	hashes2 := extractCertHashes(ln2.Multiaddr())
 	require.Equal(t, hashes1, hashes2)
 }

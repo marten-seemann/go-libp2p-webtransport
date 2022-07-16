@@ -46,14 +46,15 @@ func TestInitialCert(t *testing.T) {
 	conf := m.GetConfig()
 	require.Len(t, conf.Certificates, 1)
 	cert := conf.Certificates[0]
-	require.Equal(t, cl.Now().UTC(), cert.Leaf.NotBefore)
-	require.Equal(t, cl.Now().Add(certValidity).UTC(), cert.Leaf.NotAfter)
+	require.Equal(t, cl.Now().Add(-clockSkewAllowance).UTC(), cert.Leaf.NotBefore)
+	require.Equal(t, cert.Leaf.NotBefore.Add(certValidity), cert.Leaf.NotAfter)
 	addr := m.AddrComponent()
 	components := splitMultiaddr(addr)
-	require.Len(t, components, 1)
+	require.Len(t, components, 2)
 	require.Equal(t, ma.P_CERTHASH, components[0].Protocol().Code)
 	hash := certificateHashFromTLSConfig(conf)
 	require.Equal(t, hash[:], certHashFromComponent(t, components[0]))
+	require.Equal(t, ma.P_CERTHASH, components[1].Protocol().Code)
 }
 
 func TestCertRenewal(t *testing.T) {
@@ -63,21 +64,39 @@ func TestCertRenewal(t *testing.T) {
 	defer m.Close()
 
 	firstConf := m.GetConfig()
-	require.Len(t, splitMultiaddr(m.AddrComponent()), 1)
+	first := splitMultiaddr(m.AddrComponent())
+	require.Len(t, first, 2)
+	require.NotEqual(t, first[0].Value(), first[1].Value(), "the hashes should differ")
 	// wait for a new certificate to be generated
-	cl.Add(certValidity / 2)
-	require.Eventually(t, func() bool { return len(splitMultiaddr(m.AddrComponent())) > 1 }, 200*time.Millisecond, 10*time.Millisecond)
-	// the actual config used should still be the same, we're just advertising the hash of the next config
-	components := splitMultiaddr(m.AddrComponent())
-	require.Len(t, components, 2)
-	for _, c := range components {
+	cl.Add(certValidity - 2*clockSkewAllowance - time.Second)
+	require.Never(t, func() bool {
+		for i, c := range splitMultiaddr(m.AddrComponent()) {
+			if c.Value() != first[i].Value() {
+				return true
+			}
+		}
+		return false
+	}, 100*time.Millisecond, 10*time.Millisecond)
+	cl.Add(2 * time.Second)
+	require.Eventually(t, func() bool { return m.GetConfig() != firstConf }, 200*time.Millisecond, 10*time.Millisecond)
+	secondConf := m.GetConfig()
+
+	second := splitMultiaddr(m.AddrComponent())
+	require.Len(t, second, 2)
+	for _, c := range second {
 		require.Equal(t, ma.P_CERTHASH, c.Protocol().Code)
 	}
-	require.Equal(t, firstConf, m.GetConfig())
-	cl.Add(certValidity / 2)
-	require.Eventually(t, func() bool { return m.GetConfig() != firstConf }, 200*time.Millisecond, 10*time.Millisecond)
-	newConf := m.GetConfig()
-	// check that the new config now matches the second component
-	hash := certificateHashFromTLSConfig(newConf)
-	require.Equal(t, hash[:], certHashFromComponent(t, components[1]))
+	// check that the 2nd certificate from the beginning was rolled over to be the 1st certificate
+	require.Equal(t, first[1].Value(), second[0].Value())
+	require.NotEqual(t, first[0].Value(), second[1].Value())
+
+	cl.Add(certValidity - 2*clockSkewAllowance + time.Second)
+	require.Eventually(t, func() bool { return m.GetConfig() != secondConf }, 200*time.Millisecond, 10*time.Millisecond)
+	third := splitMultiaddr(m.AddrComponent())
+	require.Len(t, third, 2)
+	for _, c := range third {
+		require.Equal(t, ma.P_CERTHASH, c.Protocol().Code)
+	}
+	// check that the 2nd certificate from the beginning was rolled over to be the 1st certificate
+	require.Equal(t, second[1].Value(), third[0].Value())
 }
