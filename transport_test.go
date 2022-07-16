@@ -2,12 +2,19 @@ package libp2pwebtransport_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,6 +69,19 @@ func stripCertHashes(addr ma.Multiaddr) ma.Multiaddr {
 		}
 		addr, _ = ma.SplitLast(addr)
 	}
+}
+
+// create a /certhash multiaddr component using the SHA256 of foobar
+func getCerthashComponent(t *testing.T, b []byte) ma.Multiaddr {
+	t.Helper()
+	h := sha256.Sum256(b)
+	mh, err := multihash.Encode(h[:], multihash.SHA2_256)
+	require.NoError(t, err)
+	certStr, err := multibase.Encode(multibase.Base58BTC, mh)
+	require.NoError(t, err)
+	ha, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, certStr)
+	require.NoError(t, err)
+	return ha
 }
 
 func TestTransport(t *testing.T) {
@@ -129,29 +149,11 @@ func TestHashVerification(t *testing.T) {
 	require.NoError(t, err)
 	defer tr2.(io.Closer).Close()
 
-	// create a hash component using the SHA256 of foobar
-	h := sha256.Sum256([]byte("foobar"))
-	mh, err := multihash.Encode(h[:], multihash.SHA2_256)
-	require.NoError(t, err)
-	certStr, err := multibase.Encode(multibase.Base58BTC, mh)
-	require.NoError(t, err)
-	foobarHash, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, certStr)
-	require.NoError(t, err)
+	foobarHash := getCerthashComponent(t, []byte("foobar"))
 
 	t.Run("fails using only a wrong hash", func(t *testing.T) {
 		// replace the certificate hash in the multiaddr with a fake hash
-		addr := ln.Multiaddr()
-		// strip off all certhash components
-		for {
-			a, comp := ma.SplitLast(addr)
-			if comp.Protocol().Code != ma.P_CERTHASH {
-				break
-			}
-			addr = a
-		}
-
-		addr = addr.Encapsulate(foobarHash)
-
+		addr := stripCertHashes(ln.Multiaddr()).Encapsulate(foobarHash)
 		_, err := tr2.Dial(context.Background(), addr, serverID)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "CRYPTO_ERROR (0x12a): cert hash not found")
@@ -423,4 +425,85 @@ func TestConnectionGaterInterceptSecured(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+func getTLSConf(t *testing.T, ip net.IP, start, end time.Time) *tls.Config {
+	t.Helper()
+	certTempl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1234),
+		Subject:               pkix.Name{Organization: []string{"webtransport"}},
+		NotBefore:             start,
+		NotAfter:              end,
+		IsCA:                  true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{ip},
+	}
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	caBytes, err := x509.CreateCertificate(rand.Reader, certTempl, certTempl, &priv.PublicKey, priv)
+	require.NoError(t, err)
+	cert, err := x509.ParseCertificate(caBytes)
+	require.NoError(t, err)
+	return &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{cert.Raw},
+			PrivateKey:  priv,
+			Leaf:        cert,
+		}},
+	}
+}
+
+func TestStaticTLSConf(t *testing.T) {
+	tlsConf := getTLSConf(t, net.ParseIP("127.0.0.1"), time.Now(), time.Now().Add(365*24*time.Hour))
+
+	serverID, serverKey := newIdentity(t)
+	tr, err := libp2pwebtransport.New(serverKey, nil, network.NullResourceManager, libp2pwebtransport.WithTLSConfig(tlsConf))
+	require.NoError(t, err)
+	defer tr.(io.Closer).Close()
+	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/quic/webtransport"))
+	require.NoError(t, err)
+	defer ln.Close()
+	require.Empty(t, extractCertHashes(ln.Multiaddr()), "listener address shouldn't contain any certhash")
+
+	t.Run("fails when the certificate is invalid", func(t *testing.T) {
+		_, key := newIdentity(t)
+		cl, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
+		require.NoError(t, err)
+		defer cl.(io.Closer).Close()
+
+		_, err = cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+		require.Error(t, err)
+		if !strings.Contains(err.Error(), "certificate is not trusted") &&
+			!strings.Contains(err.Error(), "certificate signed by unknown authority") {
+			t.Fatalf("expected a certificate error, got %+v", err)
+		}
+	})
+
+	t.Run("fails when dialing with a wrong certhash", func(t *testing.T) {
+		_, key := newIdentity(t)
+		cl, err := libp2pwebtransport.New(key, nil, network.NullResourceManager)
+		require.NoError(t, err)
+		defer cl.(io.Closer).Close()
+
+		addr := ln.Multiaddr().Encapsulate(getCerthashComponent(t, []byte("foo")))
+		_, err = cl.Dial(context.Background(), addr, serverID)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cert hash not found")
+	})
+
+	t.Run("accepts a valid TLS certificate", func(t *testing.T) {
+		_, key := newIdentity(t)
+		store := x509.NewCertPool()
+		store.AddCert(tlsConf.Certificates[0].Leaf)
+		tlsConf := &tls.Config{RootCAs: store}
+		cl, err := libp2pwebtransport.New(key, nil, network.NullResourceManager, libp2pwebtransport.WithTLSClientConfig(tlsConf))
+		require.NoError(t, err)
+		defer cl.(io.Closer).Close()
+
+		conn, err := cl.Dial(context.Background(), ln.Multiaddr(), serverID)
+		require.NoError(t, err)
+		defer conn.Close()
+	})
 }

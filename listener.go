@@ -27,11 +27,13 @@ const queueLen = 16
 const handshakeTimeout = 10 * time.Second
 
 type listener struct {
-	transport   tpt.Transport
-	noise       *noise.Transport
-	certManager *certManager
-	rcmgr       network.ResourceManager
-	gater       connmgr.ConnectionGater
+	transport     tpt.Transport
+	noise         *noise.Transport
+	certManager   *certManager
+	staticTLSConf *tls.Config
+
+	rcmgr network.ResourceManager
+	gater connmgr.ConnectionGater
 
 	server webtransport.Server
 
@@ -48,7 +50,7 @@ type listener struct {
 
 var _ tpt.Listener = &listener{}
 
-func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) (tpt.Listener, error) {
+func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Transport, certManager *certManager, tlsConf *tls.Config, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) (tpt.Listener, error) {
 	network, addr, err := manet.DialArgs(laddr)
 	if err != nil {
 		return nil, err
@@ -65,23 +67,23 @@ func newListener(laddr ma.Multiaddr, transport tpt.Transport, noise *noise.Trans
 	if err != nil {
 		return nil, err
 	}
+	if tlsConf == nil {
+		tlsConf = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			return certManager.GetConfig(), nil
+		}}
+	}
 	ln := &listener{
-		transport:    transport,
-		noise:        noise,
-		certManager:  certManager,
-		rcmgr:        rcmgr,
-		gater:        gater,
-		queue:        make(chan tpt.CapableConn, queueLen),
-		serverClosed: make(chan struct{}),
-		addr:         udpConn.LocalAddr(),
-		multiaddr:    localMultiaddr,
-		server: webtransport.Server{
-			H3: http3.Server{
-				TLSConfig: &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
-					return certManager.GetConfig(), nil
-				}},
-			},
-		},
+		transport:     transport,
+		noise:         noise,
+		certManager:   certManager,
+		staticTLSConf: tlsConf,
+		rcmgr:         rcmgr,
+		gater:         gater,
+		queue:         make(chan tpt.CapableConn, queueLen),
+		serverClosed:  make(chan struct{}),
+		addr:          udpConn.LocalAddr(),
+		multiaddr:     localMultiaddr,
+		server:        webtransport.Server{H3: http3.Server{TLSConfig: tlsConf}},
 	}
 	ln.ctx, ln.ctxCancel = context.WithCancel(context.Background())
 	mux := http.NewServeMux()
@@ -198,6 +200,9 @@ func (l *listener) Addr() net.Addr {
 }
 
 func (l *listener) Multiaddr() ma.Multiaddr {
+	if l.certManager == nil {
+		return l.multiaddr
+	}
 	return l.multiaddr.Encapsulate(l.certManager.AddrComponent())
 }
 

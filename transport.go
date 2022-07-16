@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -43,6 +44,27 @@ func WithClock(cl clock.Clock) Option {
 	}
 }
 
+// WithTLSConfig sets a tls.Config used for listening.
+// When used, the certificate from that config will be used, and no /certhash will be added to the listener's multiaddr.
+// This is most useful when running a listener that has a valid (CA-signed) certificate.
+func WithTLSConfig(c *tls.Config) Option {
+	return func(t *transport) error {
+		t.staticTLSConf = c
+		return nil
+	}
+}
+
+// WithTLSClientConfig sets a custom tls.Config used for dialing.
+// This option is most useful for setting a custom tls.Config.RootCAs certificate pool.
+// When dialing a multiaddr that contains a /certhash component, this library will set InsecureSkipVerify and
+// overwrite the VerifyPeerCertificate callback.
+func WithTLSClientConfig(c *tls.Config) Option {
+	return func(t *transport) error {
+		t.tlsClientConf = c
+		return nil
+	}
+}
+
 type transport struct {
 	privKey ic.PrivKey
 	pid     peer.ID
@@ -54,6 +76,8 @@ type transport struct {
 	listenOnce    sync.Once
 	listenOnceErr error
 	certManager   *certManager
+	staticTLSConf *tls.Config
+	tlsClientConf *tls.Config
 
 	noise *noise.Transport
 }
@@ -129,15 +153,21 @@ func (t *transport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (tp
 
 func (t *transport) dial(ctx context.Context, addr string, certHashes []multihash.DecodedMultihash) (*webtransport.Session, error) {
 	url := fmt.Sprintf("https://%s%s", addr, webtransportHTTPEndpoint)
+	var tlsConf *tls.Config
+	if t.tlsClientConf != nil {
+		tlsConf = t.tlsClientConf.Clone()
+	} else {
+		tlsConf = &tls.Config{}
+	}
+
+	if len(certHashes) > 0 {
+		tlsConf.InsecureSkipVerify = true // this is not insecure. We verify the certificate ourselves.
+		tlsConf.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			return verifyRawCerts(rawCerts, certHashes)
+		}
+	}
 	dialer := webtransport.Dialer{
-		RoundTripper: &http3.RoundTripper{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // this is not insecure. We verify the certificate ourselves.
-				VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-					return verifyRawCerts(rawCerts, certHashes)
-				},
-			},
-		},
+		RoundTripper: &http3.RoundTripper{TLSClientConfig: tlsConf},
 	}
 	rsp, sess, err := dialer.Dial(ctx, url, nil)
 	if err != nil {
@@ -193,6 +223,14 @@ func (t *transport) checkEarlyData(b []byte) error {
 		return fmt.Errorf("failed to unmarshal early data protobuf: %w", err)
 	}
 	hashes := make([]multihash.DecodedMultihash, 0, len(msg.CertHashes))
+
+	if t.staticTLSConf != nil {
+		if len(hashes) > 0 {
+			return errors.New("using static TLS config, didn't expect any certificate hashes")
+		}
+		return nil
+	}
+
 	for _, h := range msg.CertHashes {
 		dh, err := multihash.Decode(h)
 		if err != nil {
@@ -224,13 +262,15 @@ func (t *transport) Listen(laddr ma.Multiaddr) (tpt.Listener, error) {
 	if !webtransportMatcher.Matches(laddr) {
 		return nil, fmt.Errorf("cannot listen on non-WebTransport addr: %s", laddr)
 	}
-	t.listenOnce.Do(func() {
-		t.certManager, t.listenOnceErr = newCertManager(t.clock)
-	})
-	if t.listenOnceErr != nil {
-		return nil, t.listenOnceErr
+	if t.staticTLSConf == nil {
+		t.listenOnce.Do(func() {
+			t.certManager, t.listenOnceErr = newCertManager(t.clock)
+		})
+		if t.listenOnceErr != nil {
+			return nil, t.listenOnceErr
+		}
 	}
-	return newListener(laddr, t, t.noise, t.certManager, t.gater, t.rcmgr)
+	return newListener(laddr, t, t.noise, t.certManager, t.staticTLSConf, t.gater, t.rcmgr)
 }
 
 func (t *transport) Protocols() []int {
